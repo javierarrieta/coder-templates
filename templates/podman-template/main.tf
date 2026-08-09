@@ -19,25 +19,25 @@ terraform {
 variable "docker_host" {
   description = "Docker/Podman API endpoint (mTLS)"
   type        = string
-  default     = "tcp://localhost:2376"
+  default     = "tcp://192.168.0.29:2376"
 }
 
 variable "workspace_endpoint" {
   description = "Workspace target helper API endpoint"
   type        = string
-  default     = "https://localhost:2377"
+  default     = "https://192.168.0.29:2377"
 }
 
 variable "registry_address" {
   description = "Private registry address for workspace image pulls"
   type        = string
-  default     = "registry.example.com"
+  default     = "registry.l.arrieta.eu"
 }
 
 variable "workspace_image" {
   description = "Workspace container image (registry/repo:tag)"
   type        = string
-  default     = "registry.example.com/coder-workspace:latest"
+  default     = "registry.l.arrieta.eu/coder-workspace:2c926e3"
 }
 
 provider "coder" {}
