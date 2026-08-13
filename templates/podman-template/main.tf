@@ -34,12 +34,6 @@ variable "registry_address" {
   default     = "registry.l.arrieta.eu"
 }
 
-variable "workspace_image" {
-  description = "Workspace container image (registry/repo:tag)"
-  type        = string
-  default     = "registry.l.arrieta.eu/coder-workspace:e08197f"
-}
-
 provider "coder" {}
 
 data "coder_workspace" "me" {}
@@ -132,8 +126,17 @@ resource "docker_volume" "home" {
   depends_on = [llm01_workspace_target.workspace]
 }
 
+data "coder_parameter" "workspace_image" {
+  name         = "workspace_image"
+  display_name = "Workspace image"
+  description  = "Workspace container image (registry/repo:tag)"
+  type         = "string"
+  default      = "registry.l.arrieta.eu/coder-workspace:e08197f"
+  mutable      = true
+}
+
 resource "docker_image" "workspace" {
-  name = var.workspace_image
+  name = data.coder_parameter.workspace_image.value
 }
 
 resource "docker_container" "workspace" {
