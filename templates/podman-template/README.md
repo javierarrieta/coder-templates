@@ -85,26 +85,35 @@ container's startup user, and persists across container restarts/recreates).
 The current image (`coder-workspace`) boots as `coder` (uid 1000), so the
 template shim above **does not run**. The image is built from
 `pkgs/coder-workspace` (`dockerTools.buildImage` in the `nixos-configurations`
-flake); add this to its `runAsRoot` so VS Code Server's glibc binaries can
-exec and resolve libraries from the store:
+flake); its `runAsRoot` does the following so VS Code Server's glibc binaries
+can exec and resolve libraries from the store:
 
 ```sh
 # glibc loader + libs at FHS paths so unpatched binaries can run.
-mkdir -p /lib /lib64 /usr/lib /usr/lib64
+mkdir -p /lib /lib64 /usr/lib /usr/lib64 /usr/bin /sbin
 ln -sfn ${pkgs.glibc}/lib/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2
 ln -sfn ${pkgs.glibc}/lib/ld-linux-x86-64.so.2 /lib/ld-linux-x86-64.so.2
 for lib in libc.so.6 libm.so.6 libdl.so.2 libpthread.so.0 librt.so.1 libresolv.so.2 libnss_dns.so.2 libnss_files.so.2; do
   ln -sfn ${pkgs.glibc}/lib/$lib /lib64/$lib
   ln -sfn ${pkgs.glibc}/lib/$lib /usr/lib/$lib
+  ln -sfn ${pkgs.glibc}/lib/$lib /usr/lib64/$lib
 done
 ln -sfn ${pkgs.stdenv.cc.cc.lib}/lib/libstdc++.so.6 /lib64/libstdc++.so.6
 ln -sfn ${pkgs.stdenv.cc.cc.lib}/lib/libstdc++.so.6 /usr/lib/libstdc++.so.6
+ln -sfn ${pkgs.stdenv.cc.cc.lib}/lib/libstdc++.so.6 /usr/lib64/libstdc++.so.6
 ln -sfn ${pkgs.libgcc}/lib/libgcc_s.so.1 /lib64/libgcc_s.so.1
 ln -sfn ${pkgs.libgcc}/lib/libgcc_s.so.1 /usr/lib/libgcc_s.so.1
+ln -sfn ${pkgs.libgcc}/lib/libgcc_s.so.1 /usr/lib64/libgcc_s.so.1
 ln -sfn ${pkgs.zlib}/lib/libz.so.1 /lib64/libz.so.1
 ln -sfn ${pkgs.zlib}/lib/libz.so.1 /usr/lib/libz.so.1
-ln -sfn ${pkgs.musl}/lib/ld-musl-x86_64.so.1 /lib/ld-musl-x86_64.so.1
-ln -sfn ${pkgs.musl}/lib/libc.musl-x86_64.so.1 /lib/libc.musl-x86_64.so.1
+# 'sh' shebang needs /usr/bin/env; VS Code CLI GNU prereq probes need ldd and
+# /sbin/ldconfig.
+ln -sfn ${pkgs.coreutils}/bin/env /usr/bin/env
+ln -sfn ${pkgs.glibc.bin}/bin/ldconfig /sbin/ldconfig
+ln -sfn ${pkgs.glibc.bin}/bin/ldd /usr/bin/ldd
+# NixOS marker: VS Code Server's CLI checks /etc/NIXOS (not os-release) and
+# then selects the default glibc server build.
+touch /etc/NIXOS
 ```
 
 In Nix `''...''` strings the loop variable must be escaped as `\$lib`.
@@ -112,6 +121,15 @@ In Nix `''...''` strings the loop variable must be escaped as `\$lib`.
 musl loader + `NIX_LD` env vars, while VS Code binaries hardcode PT_INTERP
 `/lib64/ld-linux-x86-64.so.2` and are invoked directly (no env), so they need
 the real glibc loader symlinked at the standard paths.
+
+**Do NOT add a musl loader at `/lib`** (`ld-musl-x86_64.so.1`). The CLI's
+`check_musl_interpreter` probe treats its presence as "this is a musl host"
+and downloads the **Alpine/musl server** (`server-linux-alpine`); that musl
+`node` then fails to run against the glibc libraries wired above
+(`Error relocating /usr/lib/libstdc++.so.6: ... symbol not found`). Without
+it, `check_is_nixos` (`/etc/NIXOS`) + the GNU libstdc++/libc probes select the
+default `server-linux-x64` build, which is exactly what runs on these glibc
+libraries.
 
 After the rebuild: push the image to the registry under a new pinned tag
 (`git rev-parse --short HEAD`), set `workspace_image` to it, push the template
