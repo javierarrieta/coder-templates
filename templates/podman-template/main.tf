@@ -37,7 +37,7 @@ variable "registry_address" {
 variable "workspace_image" {
   description = "Workspace container image (registry/repo:tag)"
   type        = string
-  default     = "registry.l.arrieta.eu/coder-workspace:2c926e3"
+  default     = "registry.l.arrieta.eu/coder-workspace:e08197f"
 }
 
 provider "coder" {}
