@@ -131,7 +131,7 @@ data "coder_parameter" "workspace_image" {
   display_name = "Workspace image"
   description  = "Workspace container image (registry/repo:tag)"
   type         = "string"
-  default      = "registry.l.arrieta.eu/coder-workspace:bbd9837"
+  default      = "registry.l.arrieta.eu/coder-workspace:dev-tools3"
   mutable      = true
 }
 
