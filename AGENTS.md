@@ -32,6 +32,15 @@ The image is built in the sibling repo **`nixos-configurations`**
 override at the top, which bakes config into the fish package). Then, on a
 machine able to build `x86_64-linux` (the previous image-build host):
 
+The image is built on **`llm01`** (`192.168.0.29`, user `javier`), a Linux
+x86_64 NixOS host with nix, docker (Podman), and the repo checked out at
+`~/code/nixos-configurations`. From this Mac you cannot build it directly
+(this Mac is `aarch64-darwin` with no x86_64-linux builder configured — see
+`/etc/nix/nix.conf` with `extra-platforms = aarch64-linux` only). The Alpine
+host at `home.arrieta.eu` has no nix/docker. Push credentials for
+`registry.l.arrieta.eu` are retrieved from the macOS keychain
+(`docker-credential-osxkeychain`) on `docker push`; do not record them.
+
 ```bash
 # Build the image tarball (flake output attr: .#coder-workspace)
 nix --extra-experimental-features 'nix-command flakes' build .#coder-workspace
@@ -77,7 +86,7 @@ and **update** the workspace (see below).
 ```bash
 coder login <coder url>
 coder templates push podman-template \
-  --directory coder/templates/podman-template \
+  --directory templates/podman-template \
   --yes
 ```
 
@@ -86,6 +95,16 @@ template or the workspace image, you must also **update** the workspace to the
 new template version (`coder update <workspace>` or the dashboard Update button)
 and **restart** for the new image/cmd to take effect. A plain restart keeps the
 old template/image.
+
+**Update pitfall:** if `coder update` reports "Workspace is up-to-date" but the
+workspace is still running the old image, the workspace has a stored value for
+the mutable `workspace_image` parameter that overrides the new template default.
+Force the update so the new default is applied, then restart:
+```bash
+coder update <workspace> --force
+coder restart <workspace>
+```
+Verify the running container picked up the new image after the restart.
 
 ## Workspace image (NixOS + VS Code Server) rules
 

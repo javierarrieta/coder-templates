@@ -7,7 +7,7 @@ Workspaces run as rootless podman containers on the configured host with homes o
 ```bash
 coder login <coder url>
 coder templates push podman-template \
-  --directory coder/templates/podman-template \
+  --directory templates/podman-template \
   --yes
 ```
 
