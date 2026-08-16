@@ -149,7 +149,14 @@ added `tar`.
 After re-pushing the template, the workspace must be **updated** to the new
 template version (`coder update <workspace>` or the dashboard Update button);
 pushing alone does not upgrade existing workspaces, and a plain restart keeps
-the old template. Verify the container got the new command and the file on the
+the old template. If `coder update` says "up-to-date" but the workspace still
+shows the old image, the mutable `workspace_image` parameter has a stored value
+overriding the new default — pass it explicitly on restart (there is no
+`--force` flag in Coder v2.35.1):
+```sh
+coder restart <workspace> --parameter workspace_image=registry.l.arrieta.eu/coder-workspace:<short-sha>
+```
+Verify the container got the new command and the file on the
 Podman host:
 
 ```sh

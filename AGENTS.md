@@ -90,21 +90,23 @@ coder templates push podman-template \
   --yes
 ```
 
-**Pushing alone does NOT upgrade existing workspaces.** After changing the
-template or the workspace image, you must also **update** the workspace to the
-new template version (`coder update <workspace>` or the dashboard Update button)
-and **restart** for the new image/cmd to take effect. A plain restart keeps the
-old template/image.
+After changing the template or the workspace image, you must also **update** the
+workspace to the new template version (`coder update <workspace>` or the dashboard
+Update button) and **restart** for the new image/cmd to take effect. A plain
+restart keeps the old template/image. Pushing the template alone does NOT upgrade
+existing workspaces.
 
-**Update pitfall:** if `coder update` reports "Workspace is up-to-date" but the
-workspace is still running the old image, the workspace has a stored value for
+**Update pitfall:** If `coder update` reports "Workspace is up-to-date" but the
+workspace is still running the old image, the workspace has a *stored* value for
 the mutable `workspace_image` parameter that overrides the new template default.
-Force the update so the new default is applied, then restart:
+(Forcing via `coder update --force` does NOT exist in Coder v2.35.1 — it errors
+"unknown flag: --force".) Reset the stored parameter by passing it explicitly on
+`restart`, which re-applies it:
 ```bash
-coder update <workspace> --force
-coder restart <workspace>
+coder restart <workspace> --parameter workspace_image=registry.l.arrieta.eu/coder-workspace:<short-sha>
 ```
-Verify the running container picked up the new image after the restart.
+Confirm with `yes` at the restart prompt. Verify the running container picked up
+the new image after the restart (e.g. `coder ssh <workspace> 'command -v sops age'`).
 
 ## Workspace image (NixOS + VS Code Server) rules
 
