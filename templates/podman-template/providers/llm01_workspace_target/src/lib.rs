@@ -9,10 +9,13 @@ use async_trait::async_trait;
 use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
 
-use tf_provider::schema::{Attribute, AttributeConstraint, AttributeType, Block, Description, Schema};
+use tf_provider::schema::{
+    Attribute, AttributeConstraint, AttributeType, Block, Description, Schema,
+};
 use tf_provider::value::{ValueBool, ValueEmpty, ValueNumber, ValueString};
-use tf_provider::{map, AttributePath, Diagnostics, DynamicDataSource, DynamicResource, Provider, Resource};
-
+use tf_provider::{
+    map, AttributePath, Diagnostics, DynamicDataSource, DynamicResource, Provider, Resource,
+};
 
 /// Provider configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -54,7 +57,7 @@ pub struct HelperResponse {
 }
 
 /// mTLS HTTP client for the workspace target helper API.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct HelperClient {
     endpoint: String,
     http: HttpClient,
@@ -119,9 +122,15 @@ impl HelperClient {
         existing_capability: Option<&str>,
     ) -> Result<String> {
         let resp = self
-            .call("POST", &format!("lease/{}/acquire", workspace), None, existing_capability)
+            .call(
+                "POST",
+                &format!("lease/{}/acquire", workspace),
+                None,
+                existing_capability,
+            )
             .await?;
-        resp.capability.ok_or_else(|| anyhow!("helper returned no capability"))
+        resp.capability
+            .ok_or_else(|| anyhow!("helper returned no capability"))
     }
 
     pub async fn provision(&self, workspace: &str, capability: &str, size_gb: i64) -> Result<()> {
@@ -240,7 +249,10 @@ impl Provider for Llm01Provider {
         let endpoint = config.endpoint.as_str();
         let cert_path = config.cert_path.as_str();
         if endpoint.is_empty() || cert_path.is_empty() {
-            _diags.root_error("missing provider config", "endpoint and cert_path are required");
+            _diags.root_error(
+                "missing provider config",
+                "endpoint and cert_path are required",
+            );
             return None;
         }
         match HelperClient::new(endpoint, cert_path) {
@@ -330,11 +342,7 @@ impl Resource for WorkspaceTargetResource {
         })
     }
 
-    async fn validate<'a>(
-        &self,
-        _diags: &mut Diagnostics,
-        _config: Self::State<'a>,
-    ) -> Option<()> {
+    async fn validate<'a>(&self, _diags: &mut Diagnostics, _config: Self::State<'a>) -> Option<()> {
         Some(())
     }
 
@@ -366,11 +374,7 @@ impl Resource for WorkspaceTargetResource {
         _config_state: Self::State<'a>,
         prior_private_state: Self::PrivateState<'a>,
         _provider_meta_state: Self::ProviderMetaState<'a>,
-    ) -> Option<(
-        Self::State<'a>,
-        Self::PrivateState<'a>,
-        Vec<AttributePath>,
-    )> {
+    ) -> Option<(Self::State<'a>, Self::PrivateState<'a>, Vec<AttributePath>)> {
         // workspace and size_gb are immutable; a change forces replacement.
         let mut replace = Vec::new();
         if proposed_state.workspace != prior_state.workspace {
@@ -526,5 +530,72 @@ impl Resource for WorkspaceTargetResource {
             return None;
         }
         Some(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::borrow::Cow;
+
+    fn state(workspace: &str, size_gb: i64, active: bool) -> WorkspaceTargetState<'static> {
+        WorkspaceTargetState {
+            workspace: ValueString::Value(Cow::Owned(workspace.to_string())),
+            size_gb: ValueNumber::Value(size_gb),
+            active: ValueBool::Value(active),
+        }
+    }
+
+    async fn plan_replace_paths(
+        prior: WorkspaceTargetState<'static>,
+        proposed: WorkspaceTargetState<'static>,
+    ) -> Vec<AttributePath> {
+        tf_provider::Resource::plan_update(
+            &WorkspaceTargetResource::default(),
+            &mut Diagnostics::default(),
+            prior,
+            proposed,
+            WorkspaceTargetState::default(),
+            WorkspaceTargetPrivate::default(),
+            ValueEmpty::default(),
+        )
+        .await
+        .expect("plan_update should produce a plan")
+        .2
+    }
+
+    #[tokio::test]
+    async fn plan_update_forces_replacement_on_workspace_change() {
+        let replace = plan_replace_paths(state("ws-a", 50, true), state("ws-b", 50, true)).await;
+        assert_eq!(replace, vec![AttributePath::new("workspace")]);
+    }
+
+    #[tokio::test]
+    async fn plan_update_forces_replacement_on_size_change() {
+        let replace = plan_replace_paths(state("ws-a", 50, true), state("ws-a", 80, true)).await;
+        assert_eq!(replace, vec![AttributePath::new("size_gb")]);
+    }
+
+    #[tokio::test]
+    async fn plan_update_does_not_replace_on_active_only_change() {
+        let replace = plan_replace_paths(state("ws-a", 50, true), state("ws-a", 50, false)).await;
+        assert!(replace.is_empty());
+    }
+
+    #[test]
+    fn helper_response_deserializes_with_defaults() {
+        let parsed: HelperResponse =
+            serde_json::from_str(r#"{"ok":true,"capability":"cap-123"}"#).unwrap();
+        assert!(parsed.ok);
+        assert_eq!(parsed.capability.as_deref(), Some("cap-123"));
+        assert_eq!(parsed.error, None);
+        assert_eq!(parsed.device, None);
+        assert_eq!(parsed.mountpoint, None);
+    }
+
+    #[test]
+    fn helper_client_new_errors_on_missing_cert_files() {
+        let err = HelperClient::new("https://localhost:2377", "/nonexistent/certs").unwrap_err();
+        assert!(err.to_string().contains("No such file"));
     }
 }
