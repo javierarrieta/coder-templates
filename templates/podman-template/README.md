@@ -190,7 +190,7 @@ with nginx ingress at `registry.l.arrieta.eu/infra/llm01`.
 **Distribution steps:**
 
 1. Build the provider: `cargo build --release --bin terraform-provider-llm01`
-2. Create `terraform-provider-llm01_0.1.1_linux_amd64.zip` containing the binary
+2. Create `terraform-provider-llm01_0.1.1_linux_amd64.zip` containing **only the binary** (exclude `target/` directory from zip)
 3. Create `terraform-provider-llm01_0.1.1_SHA256SUMS` with the SHA256 hash
 4. Decrypt the GPG signing key from `sops-encrypted` K8s secret using the age key
    `age1wynx7pnkg8z6n20zxg2krecmgyy5gdlj6xrs2tmfjctefy2xwv3qa2v24g`
