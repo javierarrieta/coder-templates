@@ -1,6 +1,6 @@
 [package]
 name = "terraform-provider-llm01"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "workspace target provider: iSCSI volume lifecycle over the workspace target helper API"
 license = "Apache-2.0"
