@@ -8,16 +8,19 @@ Trigger the build workflow with a specific version:
 gh workflow run build.yml -f version="v0.1.1"
 ```
 
-## Release Workflow (Auto on Tag)
+## Release Workflow (Auto on Release)
 
-When a tag is pushed (e.g., `v0.1.1`):
+Creating a GitHub **Release** (e.g., `v0.1.1`) triggers `publish.yml`, which
+builds, packages, and uploads the artifacts using the release tag for the
+version. Pushing a tag alone does NOT trigger it — the tag must be attached to
+a release:
 
 ```bash
-git tag v0.1.1
-git push origin v0.1.1
+gh release create v0.1.1 --generate-notes
+# or create the release from the GitHub UI
 ```
 
-The `publish.yml` workflow will automatically build, package, and upload artifacts.
+`publish.yml` derives the artifact version from `github.event.release.tag_name`.
 
 ## Artifacts
 
