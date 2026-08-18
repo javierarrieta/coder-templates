@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - "templates/podman-template/**"
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - "templates/podman-template/**"
+
+jobs:
+  provider:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: templates/podman-template/providers/llm01_workspace_target
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Lint
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test
+
+      - name: Build release binary
+        run: cargo build --release --bin terraform-provider-llm01
+
+      - name: Upload provider binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: llm01-provider-linux-amd64
+          path: templates/podman-template/providers/llm01_workspace_target/target/release/terraform-provider-llm01
+
+  terraform:
+    runs-on: ubuntu-latest
+    needs: provider
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: Validate compatibility gate (public registry)
+        working-directory: templates/podman-template/compatibility
+        run: |
+          terraform init -input=false
+          terraform validate
+
+      - name: Download provider binary
+        uses: actions/download-artifact@v4
+        with:
+          name: llm01-provider-linux-amd64
+          path: .ci/llm01-provider
+
+      - name: Install llm01 provider into local filesystem mirror
+        shell: bash
+        run: |
+          set -euo pipefail
+          PKG="$HOME/.tf-mirror/registry.l.arrieta.eu/infra/llm01/terraform-provider-llm01/0.1.1/linux_amd64"
+          mkdir -p "$PKG"
+          cp .ci/llm01-provider/terraform-provider-llm01 "$PKG/terraform-provider-llm01_v0.1.1"
+          chmod +x "$PKG/terraform-provider-llm01_v0.1.1"
+          (cd "$PKG" && sha256sum terraform-provider-llm01_v0.1.1 > terraform-provider-llm01_v0.1.1_SHA256SUMS)
+          # Unquoted EOF: $HOME must expand at write time because Terraform
+          # does NOT interpolate env vars inside its CLI config file.
+          cat > "$HOME/.terraformrc" <<EOF
+          provider_installation {
+            filesystem_mirror {
+              path    = "$HOME/.tf-mirror"
+              include = ["registry.l.arrieta.eu/*"]
+            }
+            direct {
+              exclude = ["registry.l.arrieta.eu/*"]
+            }
+          }
+          EOF
+
+      - name: Validate template against local mirror
+        working-directory: templates/podman-template
+        run: |
+          terraform init -input=false
+          terraform validate
