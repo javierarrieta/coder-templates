@@ -17,8 +17,15 @@ The built-in Coder provisioner runs the template and reaches the Podman host thr
 
 1. Choose `memory_gb` (2-8), `cpu_count` (2-24), and `disk_gb` (10-200; immutable after creation).
 2. The template acquires the single-workspace lease and requests iSCSI provisioning through the capability-authenticated workspace target helper.
-3. The helper provisions/attaches the target, and the Docker provider starts the container from the public GHCR image (no registry credentials needed).
+3. The helper provisions/attaches the target, and the Docker provider starts the container from the public GHCR image (no registry credentials needed), bind-mounting the iSCSI target at `/home/coder`.
 4. Stop/start preserves `/home/coder` (data on TrueNAS). Delete tears down the target + zvol.
+
+The container runs as non-root uid 1000 (`coder`) with `userns_mode = "keep-id"`
+under rootless Podman, so the container user maps to the Podman host user
+(uid 1000) that owns the home data. `/home/coder` is a **direct bind mount**
+(not a named volume): rootless Podman's named-volume auto-chown fails on
+network-backed mounts (`lchown <volume>/_data: operation not permitted`), and
+bind mounts are never chowned.
 
 ## VS Code Remote-SSH on a NixOS workspace image
 

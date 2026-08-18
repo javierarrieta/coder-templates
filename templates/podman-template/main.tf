@@ -101,19 +101,6 @@ resource "llm01_workspace_target" "workspace" {
   active    = data.coder_workspace.me.start_count > 0
 }
 
-resource "docker_volume" "home" {
-  count = data.coder_workspace.me.start_count
-  name  = "coder-${data.coder_workspace.me.name}-home"
-
-  driver = "local"
-  driver_opts = {
-    type   = "none"
-    o      = "bind"
-    device = "/srv/coder/workspaces/coder-${data.coder_workspace.me.name}"
-  }
-  depends_on = [llm01_workspace_target.workspace]
-}
-
 data "coder_parameter" "workspace_image" {
   name         = "workspace_image"
   display_name = "Workspace image"
@@ -135,10 +122,19 @@ resource "docker_container" "workspace" {
   memory = data.coder_parameter.memory_gb.value * 1024
   cpus   = tostring(data.coder_parameter.cpu_count.value)
 
-  volumes {
-    container_path = "/home/coder"
-    volume_name    = docker_volume.home[0].name
+  # Bind-mount the iSCSI-backed home directory directly instead of a named
+  # volume. Rootless Podman chowns named volumes to the container user on first
+  # use, which fails with EPERM on the iSCSI mount; bind mounts are never
+  # chowned. keep-id maps the container's uid 1000 to the podman host user
+  # (uid 1000), matching the ownership of the existing home data.
+  mounts {
+    target = "/home/coder"
+    source = "/srv/coder/workspaces/coder-${data.coder_workspace.me.name}"
+    type   = "bind"
   }
+
+  user        = "1000:1000"
+  userns_mode = "keep-id"
 
   env = [
     "CODER_AGENT_TOKEN=${coder_agent.main.token}",

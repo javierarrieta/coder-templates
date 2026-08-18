@@ -10,7 +10,7 @@ resource over the workspace-target helper API.
 ```
 coder-templates/
   templates/podman-template/
-    main.tf                 # the template (agent, volumes, container, params)
+    main.tf                 # the template (agent, home bind mount, container, params)
     compatibility/main.tf   # standalone mTLS-podman-API + image-pull compatibility test (run in a provisioner pod)
     scripts/truenas-iscsi-helper-client.sh  # mTLS lifecycle script (provision/attach/detach/destroy)
     providers/llm01_workspace_target/       # Rust Terraform provider
@@ -168,8 +168,18 @@ podman exec coder-<workspace> ls -l /lib64/ld-linux-x86-64.so.2 /lib64/libstdc++
 
 - `memory_gb` (2–8, mutable), `cpu_count` (2–24, mutable), `workspace_image` (mutable).
 - `disk_gb` (10–200) is **immutable after workspace creation** (`mutable = false`).
-- The container's only volume is `/home/coder` (iSCSI-backed via the `llm01`
+- The container's only mount is `/home/coder` (iSCSI-backed via the `llm01`
   provider + helper). Data outside `/home/coder` is ephemeral to the pod.
+- `/home/coder` is a **direct bind mount** (`mounts { type = "bind" }`) of the
+  helper's iSCSI target — not a named volume. Rootless Podman chowns named
+  volumes to the container user on first use, which fails with
+  `lchown <volume>/_data: operation not permitted` on network-backed mounts;
+  bind mounts are never chowned.
+- The container runs as uid 1000 with `userns_mode = "keep-id"`, mapping the
+  container's `coder` (uid 1000) to the Podman host user (uid 1000) so the
+  existing home data stays owned/writable by the workspace user. If a workspace's
+  agent can't write `/home/coder`, the freshly-mounted iSCSI target is owned by
+  root on the host — the helper must `chown` the attached mount to uid 1000.
 - Auth/certs are mounted from Coder secrets: `/run/secrets/coder-podman-client`
   (mTLS). The image is pulled from public GHCR — no registry pull credentials
   needed (the `coder-registry-pull` secret is no longer referenced).
@@ -190,7 +200,8 @@ podman exec coder-<workspace> ls -l /lib64/ld-linux-x86-64.so.2 /lib64/libstdc++
   `X-Coder-Capability` header and never logged.
 - No Terraform/test harness is in this repo. `compatibility/main.tf` is a
   standalone check run from a provisioner pod (mTLS podman API + public image
-  pull + bind-volume + cgroup v2 limits + non-root uid 1000). On success it
+  pull + bind-mount home + keep-id + cgroup v2 limits + non-root uid 1000). On
+  success it
   requires filling in
   `docs/superpowers/evidence/2026-08-08-coder-podman-compatibility.md` and
   committing it.
