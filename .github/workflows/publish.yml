@@ -10,6 +10,9 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    defaults:
+      run:
+        working-directory: templates/podman-template/providers/llm01_workspace_target
 
     steps:
       - name: Checkout
@@ -39,7 +42,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: terraform-provider-${{ github.event.release.tag_name }}-linux-amd64
-          path: release/terraform-provider-llm01_${{ github.event.release.tag_name }}_linux_amd64.zip
+          path: templates/podman-template/providers/llm01_workspace_target/release/terraform-provider-llm01_${{ github.event.release.tag_name }}_linux_amd64.zip
 
       - name: Create checksums
         run: |
@@ -51,4 +54,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: terraform-provider-llm01-checksums
-          path: release/*.SHA256SUMS
+          path: templates/podman-template/providers/llm01_workspace_target/release/*.SHA256SUMS
