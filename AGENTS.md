@@ -213,6 +213,33 @@ podman exec coder-<workspace> ls -l /lib64/ld-linux-x86-64.so.2 /lib64/libstdc++
 - `cargo` (1.92, Nix profile) builds the provider: `cargo build` in
   `templates/podman-template/providers/llm01_workspace_target/`.
 
+### terraform-provider-llm01 v0.1.1 binary distribution (see README.md for full docs)
+
+The `llm01_workspace_target` Rust provider is built via `cargo build --release`
+and published to the private registry `registry.l.arrieta.eu/infra/llm01` as
+`terraform-provider-llm01_0.1.1_linux_amd64.zip` with SHA256 checksum and
+binary GPG signature.
+
+**Distribution steps:**
+
+1. Build: `cargo build --release --bin terraform-provider-llm01`
+2. Create `terraform-provider-llm01_0.1.1_linux_amd64.zip` containing the binary
+3. Create `terraform-provider-llm01_0.1.1_SHA256SUMS` with the SHA256 hash
+4. Decrypt GPG signing key from `sops-encrypted` K8s secret using age key
+   `age1wynx7pnkg8z6n20zxg2krecmgyy5gdlj6xrs2tmfjctefy2xwv3qa2v24g`
+5. Create **binary** GPG signature (no `--armor` flag): `gpg --sign`
+6. Upload to `/files/terraform-provider-llm01_0.1.1_linux_amd64.zip`,
+   `/files/terraform-provider-llm01_0.1.1_SHA256SUMS`,
+   `/files/terraform-provider-llm01_0.1.1_SHA256SUMS.sig`
+7. Terraform fetches via `registry.l.arrieta.eu/infra/llm01` with version `~> 0.1`
+8. Verify: `gpg --verify terraform-provider-llm01_0.1.1_SHA256SUMS.sig` (expect "Good signature")
+
+**Critical:** Use binary GPG signature, not ASCII-armored. ASCII-armored signatures
+are rejected as "invalid data: tag byte does not have MSB set". The Terraform
+provider client expects binary signatures. The GPG key is stored in K8s secrets
+via `sops-encrypted`, not in the repo. Fingerprint: `1667A87F5D80F5EB`
+(self-signed).
+
 ## Remote VS Code debugging notes (llm01)
 
 When investigating remote-VS-Code issues on a workspace, the extension host data

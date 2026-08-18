@@ -177,4 +177,33 @@ podman exec coder-<workspace> ls -l /lib64/ld-linux-x86-64.so.2 /lib64/libstdc++
 ## Providers
 
 - `coder/coder` and `kreuzwerker/docker` come from `registry.terraform.io`.
-- `registry.l.arrieta.eu/infra/llm01` is the pinned helper-client provider published to the in-cluster registry; checksums are committed in `.terraform.lock.hcl`. Update the source address in `main.tf` to match your provider registry.
+- `registry.l.arrieta.eu/infra/llm01` is the pinned helper-client provider published to the private registry at `registry.l.arrieta.eu/infra/llm01`; checksums are committed in `.terraform.lock.hcl`.
+
+### terraform-provider-llm01 v0.1.1 binary distribution
+
+The `llm01_workspace_target` Rust provider is built via `cargo build --release`
+in `providers/llm01_workspace_target/` and published to the private registry as
+`terraform-provider-llm01_0.1.1_linux_amd64.zip` with SHA256 checksum and
+binary GPG signature (not ASCII-armored). The private registry uses plain-HTTP
+with nginx ingress at `registry.l.arrieta.eu/infra/llm01`.
+
+**Distribution steps:**
+
+1. Build the provider: `cargo build --release --bin terraform-provider-llm01`
+2. Create `terraform-provider-llm01_0.1.1_linux_amd64.zip` containing the binary
+3. Create `terraform-provider-llm01_0.1.1_SHA256SUMS` with the SHA256 hash
+4. Decrypt the GPG signing key from `sops-encrypted` K8s secret using the age key
+   `age1wynx7pnkg8z6n20zxg2krecmgyy5gdlj6xrs2tmfjctefy2xwv3qa2v24g`
+5. Create a **binary** GPG signature (no `--armor` flag) with `gpg --sign`
+6. Upload to the private registry: `/files/terraform-provider-llm01_0.1.1_linux_amd64.zip`,
+   `/files/terraform-provider-llm01_0.1.1_SHA256SUMS`, `/files/terraform-provider-llm01_0.1.1_SHA256SUMS.sig`
+7. Terraform will fetch via `registry.l.arrieta.eu/infra/llm01` with version `~> 0.1`
+8. Verify: `gpg --verify terraform-provider-llm01_0.1.1_SHA256SUMS.sig` (expect "Good signature")
+
+**Important:** Use binary GPG signature (not ASCII-armored). ASCII-armored signatures
+are detected as "invalid data: tag byte does not have MSB set" by the private registry.
+The Terraform provider client expects a binary signature.
+
+**Important:** The GPG signing key is stored in K8s secrets via `sops-encrypted` and
+fetched at runtime — not in the repo. The fingerprint is `1667A87F5D80F5EB`
+(self-signed).
