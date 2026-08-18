@@ -1,11 +1,10 @@
 # Podman/Docker-provider compatibility gate for podman-template workspaces.
 #
 # Run from a Coder-like provisioner pod with the mTLS client bundle mounted at
-# /run/secrets/coder-podman-client and the registry pull credential mounted at
-# /run/secrets/coder-registry-pull (same mounts the template uses). After a
-# successful run, the evidence document
-# docs/superpowers/evidence/2026-08-08-coder-podman-compatibility.md must be
-# filled in and committed before any later task.
+# /run/secrets/coder-podman-client. The workspace image is pulled from public
+# GHCR (no registry credentials needed). After a successful run, the evidence
+# document docs/superpowers/evidence/2026-08-08-coder-podman-compatibility.md
+# must be filled in and committed before any later task.
 
 terraform {
   required_providers {
@@ -26,40 +25,19 @@ variable "cert_path" {
   default     = "/run/secrets/coder-podman-client"
 }
 
-variable "registry_address" {
-  description = "Private registry address"
-  type        = string
-  default     = "registry.example.com"
-}
-
-variable "registry_auth_username" {
-  description = "Registry pull username"
-  type        = string
-}
-
-variable "registry_auth_password" {
-  description = "Registry pull password"
-  type        = string
-}
-
 variable "workspace_image" {
   description = "Workspace container image (registry/repo:tag)"
   type        = string
-  default     = "registry.example.com/coder-workspace:compat-gate"
+  default     = "ghcr.io/javierarrieta/coder-workspace:latest"
 }
 
 provider "docker" {
   host      = var.host
   cert_path = var.cert_path
-
-  registry_auth {
-    address  = var.registry_address
-    username = var.registry_auth_username
-    password = var.registry_auth_password
-  }
 }
 
-# 1. mTLS + private registry pull: pulls through the authenticated remote API.
+# 1. mTLS podman API + public GHCR pull: connects to the remote API with the
+#    mTLS bundle; the image itself needs no registry credentials.
 resource "docker_image" "workspace" {
   name = var.workspace_image
 }

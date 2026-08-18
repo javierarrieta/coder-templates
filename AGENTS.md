@@ -11,49 +11,65 @@ resource over the workspace-target helper API.
 coder-templates/
   templates/podman-template/
     main.tf                 # the template (agent, volumes, container, params)
-    compatibility/main.tf   # standalone mTLS/registry compatibility test (run in a provisioner pod)
+    compatibility/main.tf   # standalone mTLS-podman-API + image-pull compatibility test (run in a provisioner pod)
     scripts/truenas-iscsi-helper-client.sh  # mTLS lifecycle script (provision/attach/detach/destroy)
     providers/llm01_workspace_target/       # Rust Terraform provider
       Cargo.toml / Cargo.lock / src/{lib,main}.rs
     README.md               # canonical push + image-rebuild instructions (read this first)
-  nixos-configurations/ (OUTSIDE this repo)  # pkgs/coder-workspace builds the workspace image
+  nixos-configurations/ (OUTSIDE this repo)  # pkgs/coder-workspace builds the workspace image;
+                                             # .github/workflows/workspace-image.yml pushes it to GHCR;
+                                             # IMAGE_TAGS.md records tags (update/rollback reference)
 ```
 
 The workspace image itself is built from `~/code/nixos-configurations/pkgs/coder-workspace`
 (`dockerTools.buildImage` in the nixos-configurations flake), not from this repo.
 Changes to the image require editing the Nix flake and pushing a new image tag.
 
-## Rebuild + push the workspace image (exact)
+## Rebuild + push the workspace image (GitHub Actions + GHCR)
 
 The image is built in the sibling repo **`nixos-configurations`**
-(<https://github.com/javierarrieta/nixos-configurations>), checked out at
-`~/code/nixos-configurations`. Edit only
-`pkgs/coder-workspace/default.nix` in that repo (do NOT touch the `fish` package
-override at the top, which bakes config into the fish package). Then, on a
-machine able to build `x86_64-linux` (the previous image-build host):
+(<https://github.com/javierarrieta/nixos-configurations>). A workflow at
+`.github/workflows/workspace-image.yml` builds `.#coder-workspace` on an
+`ubuntu-latest` runner (Nix via `nix-installer-action`) and pushes to the public
+**GHCR** package `ghcr.io/javierarrieta/coder-workspace`. No llm01 build host,
+no registry credentials (public pull), no macOS keychain involved.
 
-The image is built on **`llm01`** (`192.168.0.29`, user `javier`), a Linux
-x86_64 NixOS host with nix, docker (Podman), and the repo checked out at
-`~/code/nixos-configurations`. From this Mac you cannot build it directly
-(this Mac is `aarch64-darwin` with no x86_64-linux builder configured — see
-`/etc/nix/nix.conf` with `extra-platforms = aarch64-linux` only). The Alpine
-host at `home.arrieta.eu` has no nix/docker. Push credentials for
-`registry.l.arrieta.eu` are retrieved from the macOS keychain
-(`docker-credential-osxkeychain`) on `docker push`; do not record them.
+Edit only `pkgs/coder-workspace/default.nix` in that repo (do NOT touch the
+`fish` package override at the top, which bakes config into the fish package;
+its `doCheck = false` keeps the test suite from running in CI). The workflow
+runs on:
 
-```bash
-# Build the image tarball (flake output attr: .#coder-workspace)
-nix --extra-experimental-features 'nix-command flakes' build .#coder-workspace
-# Load + tag + push to the private registry
-docker load -i result
-docker tag coder-workspace:pinned registry.l.arrieta.eu/coder-workspace:<short-sha>
-docker push registry.l.arrieta.eu/coder-workspace:<short-sha>
-# (no docker daemon? fall back to podman load/push, or:)
-# skopeo copy docker-archive:result docker://registry.l.arrieta.eu/coder-workspace:<short-sha>
-```
+- push to `main` touching `pkgs/coder-workspace/**`, `flake.lock`, or the workflow
+- manual dispatch: `gh workflow run workspace-image.yml`
 
-`<short-sha>` = `git -C ~/code/nixos-configurations rev-parse --short HEAD`. Authenticate
-to the registry with the dedicated push credential; do not record it anywhere.
+### Tag strategy (updates + rollback)
+
+Each CI build pushes two tags to GHCR:
+
+- `YYYYMMDD-<short-sha>` — immutable, content-accurate (CI builds the exact
+  commit). Date prefix shows recency; never overwritten, so rollback-safe.
+- `latest` — mutable pointer to the newest build (convenience only).
+
+`IMAGE_TAGS.md` in the nixos-configurations repo is auto-appended by the
+workflow (`tag | date | commit | changes`) and is the update/rollback
+reference: newest row = current, older rows are rollback targets. Pin
+`workspace_image` in the template to an immutable tag, never `latest`.
+
+### Who owns what (why two repos)
+
+The image and the template are coupled only by a tag string — nothing is
+pushed from one repo into the other:
+
+- **nixos-configurations** owns the image *source* (the Nix flake) and the
+  build+push pipeline. Its CI publishes to the GHCR **package**
+  `ghcr.io/javierarrieta/coder-workspace` (owned by the GitHub user, not by a
+  repo) and records tags in `IMAGE_TAGS.md`.
+- **coder-templates** only references the image by tag
+  (`workspace_image = "ghcr.io/javierarrieta/coder-workspace:<tag>"` in
+  `main.tf`). The workflow never writes here.
+
+The one manual hop: after CI publishes a new tag, pin it into `main.tf` and
+push the template. CI does not touch coder-templates.
 
 The image is `bash` login shell with an interactive-only fish handoff in
 `runAsRoot`'s `/etc/bashrc` **and** `/etc/profile`:
@@ -78,8 +94,9 @@ docker run --rm --entrypoint sh coder-workspace:pinned \
 docker run --rm -it --entrypoint bash coder-workspace:pinned -c 'echo $0'        # expect: fish
 ```
 
-After the image builds, set `workspace_image` to the new tag, push the template,
-and **update** the workspace (see below).
+After the workflow run, pin `workspace_image` in the template to the new
+immutable tag from `IMAGE_TAGS.md`, push the template, and **update** the
+workspace (see below).
 
 ## Push a template change (exact)
 
@@ -103,7 +120,7 @@ the mutable `workspace_image` parameter that overrides the new template default.
 "unknown flag: --force".) Reset the stored parameter by passing it explicitly on
 `restart`, which re-applies it:
 ```bash
-coder restart <workspace> --parameter workspace_image=registry.l.arrieta.eu/coder-workspace:<short-sha>
+coder restart <workspace> --parameter workspace_image=ghcr.io/javierarrieta/coder-workspace:<YYYYMMDD-short-sha>
 ```
 Confirm with `yes` at the restart prompt. Verify the running container picked up
 the new image after the restart (e.g. `coder ssh <workspace> 'command -v sops age'`).
@@ -138,8 +155,9 @@ what runs on these glibc libraries.
 `/etc/profile` (guard: `[[ $- == *i* ]] && [[ -t 0 ]] && command -v fish >/dev/null 2>&1`;
 `[[ -o interactive ]]` is wrong — `interactive` is not a valid option).
 
-After rebuilding the image, set `workspace_image` to the new `<short-sha>` tag,
-push the template, and **update** the workspace. Verify on the Podman host:
+After rebuilding the image, pin `workspace_image` to the new immutable tag from
+`IMAGE_TAGS.md`, push the template, and **update** the workspace. Verify on the
+Podman host:
 
 ```sh
 podman inspect coder-<workspace> --format '{{json .Config.Image}}'
@@ -153,7 +171,8 @@ podman exec coder-<workspace> ls -l /lib64/ld-linux-x86-64.so.2 /lib64/libstdc++
 - The container's only volume is `/home/coder` (iSCSI-backed via the `llm01`
   provider + helper). Data outside `/home/coder` is ephemeral to the pod.
 - Auth/certs are mounted from Coder secrets: `/run/secrets/coder-podman-client`
-  (mTLS), `/run/secrets/coder-registry-pull/{username,password}` (registry pull).
+  (mTLS). The image is pulled from public GHCR — no registry pull credentials
+  needed (the `coder-registry-pull` secret is no longer referenced).
 - The single-workspace lease + iSCSI target is acquired through the `llm01`
   private provider (`registry.l.arrieta.eu/infra/llm01`). Update the source
   address in `main.tf` to match your private registry.
@@ -170,8 +189,9 @@ podman exec coder-<workspace> ls -l /lib64/ld-linux-x86-64.so.2 /lib64/libstdc++
   `$CODER_HELPER_STATE_DIR` (default `./.helper-state`), sent only in the
   `X-Coder-Capability` header and never logged.
 - No Terraform/test harness is in this repo. `compatibility/main.tf` is a
-  standalone check run from a provisioner pod (mTLS + registry pull + bind-volume
-  + cgroup v2 limits + non-root uid 1000). On success it requires filling in
+  standalone check run from a provisioner pod (mTLS podman API + public image
+  pull + bind-volume + cgroup v2 limits + non-root uid 1000). On success it
+  requires filling in
   `docs/superpowers/evidence/2026-08-08-coder-podman-compatibility.md` and
   committing it.
 

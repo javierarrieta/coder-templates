@@ -28,12 +28,6 @@ variable "workspace_endpoint" {
   default     = "https://192.168.0.29:2377"
 }
 
-variable "registry_address" {
-  description = "Private registry address for workspace image pulls"
-  type        = string
-  default     = "registry.l.arrieta.eu"
-}
-
 provider "coder" {}
 
 data "coder_workspace" "me" {}
@@ -81,12 +75,6 @@ data "coder_parameter" "disk_gb" {
 provider "docker" {
   host      = var.docker_host
   cert_path = "/run/secrets/coder-podman-client"
-
-  registry_auth {
-    address  = var.registry_address
-    username = trimspace(file("/run/secrets/coder-registry-pull/username"))
-    password = trimspace(file("/run/secrets/coder-registry-pull/password"))
-  }
 }
 
 provider "llm01" {
@@ -131,7 +119,7 @@ data "coder_parameter" "workspace_image" {
   display_name = "Workspace image"
   description  = "Workspace container image (registry/repo:tag)"
   type         = "string"
-  default      = "registry.l.arrieta.eu/coder-workspace:7e8241e"
+  default      = "ghcr.io/javierarrieta/coder-workspace:latest"
   mutable      = true
 }
 

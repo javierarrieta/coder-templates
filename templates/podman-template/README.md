@@ -17,7 +17,7 @@ The built-in Coder provisioner runs the template and reaches the Podman host thr
 
 1. Choose `memory_gb` (2-8), `cpu_count` (2-24), and `disk_gb` (10-200; immutable after creation).
 2. The template acquires the single-workspace lease and requests iSCSI provisioning through the capability-authenticated workspace target helper.
-3. The helper provisions/attaches the target, and the Docker provider starts the container with provider-supplied registry auth.
+3. The helper provisions/attaches the target, and the Docker provider starts the container from the public GHCR image (no registry credentials needed).
 4. Stop/start preserves `/home/coder` (data on TrueNAS). Delete tears down the target + zvol.
 
 ## VS Code Remote-SSH on a NixOS workspace image
@@ -131,8 +131,10 @@ it, `check_is_nixos` (`/etc/NIXOS`) + the GNU libstdc++/libc probes select the
 default `server-linux-x64` build, which is exactly what runs on these glibc
 libraries.
 
-After the rebuild: push the image to the registry under a new pinned tag
-(`git rev-parse --short HEAD`), set `workspace_image` to it, push the template
+After the rebuild (GitHub Actions workflow in `nixos-configurations`
+`.github/workflows/workspace-image.yml` pushes to
+`ghcr.io/javierarrieta/coder-workspace`): pin `workspace_image` to the new
+immutable `YYYYMMDD-<short-sha>` tag from `IMAGE_TAGS.md`, push the template
 (`coder templates push`), and **update** the workspace (push alone does not
 upgrade existing workspaces; a plain restart keeps the old image/command).
 Verify on the Podman host before testing VS Code:
@@ -154,7 +156,7 @@ shows the old image, the mutable `workspace_image` parameter has a stored value
 overriding the new default — pass it explicitly on restart (there is no
 `--force` flag in Coder v2.35.1):
 ```sh
-coder restart <workspace> --parameter workspace_image=registry.l.arrieta.eu/coder-workspace:<short-sha>
+coder restart <workspace> --parameter workspace_image=ghcr.io/javierarrieta/coder-workspace:<YYYYMMDD-short-sha>
 ```
 Verify the container got the new command and the file on the
 Podman host:
