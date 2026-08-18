@@ -1,0 +1,54 @@
+name: Build and Publish Provider
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          toolchain: stable
+
+      - name: Build provider
+        run: cargo build --release --bin terraform-provider-llm01
+
+      - name: Build binary release
+        run: |
+          mkdir -p release
+          cp target/release/terraform-provider-llm01 release/
+          ls -la release/
+
+      - name: Create zip (excluding target/)
+        run: |
+          cd release
+          zip -q terraform-provider-llm01_v0.1.1_linux_amd64.zip terraform-provider-llm01
+          ls -la
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-provider-llm01-v0.1.1-linux-amd64
+          path: release/terraform-provider-llm01_v0.1.1_linux_amd64.zip
+
+      - name: Create checksums
+        run: |
+          cd release
+          sha256sum terraform-provider-llm01_v0.1.1_linux_amd64.zip > terraform-provider-llm01_v0.1.1_linux_amd64_SHA256SUMS
+          ls -la
+
+      - name: Upload checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-provider-llm01-checksums
+          path: release/*.SHA256SUMS

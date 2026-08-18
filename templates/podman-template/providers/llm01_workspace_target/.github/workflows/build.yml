@@ -1,0 +1,58 @@
+name: Build and Publish Provider (Manual Trigger)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Provider version (e.g., v0.1.1)"
+        required: true
+        default: "v0.1.1"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          toolchain: stable
+
+      - name: Build provider
+        run: cargo build --release --bin terraform-provider-llm01
+
+      - name: Build binary release
+        run: |
+          mkdir -p release
+          cp target/release/terraform-provider-llm01 release/
+          ls -la release/
+
+      - name: Create zip (excluding target/)
+        run: |
+          cd release
+          zip -q terraform-provider-llm01_${{ github.event.inputs.version }}_linux_amd64.zip terraform-provider-llm01
+          ls -la
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-provider-${{ github.event.inputs.version }}-linux-amd64
+          path: release/terraform-provider-llm01_${{ github.event.inputs.version }}_linux_amd64.zip
+
+      - name: Create checksums
+        run: |
+          cd release
+          sha256sum terraform-provider-llm01_${{ github.event.inputs.version }}_linux_amd64.zip > terraform-provider-llm01_${{ github.event.inputs.version }}_linux_amd64_SHA256SUMS
+          ls -la
+
+      - name: Upload checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-provider-${{ github.event.inputs.version }}-checksums
+          path: release/*.SHA256SUMS
