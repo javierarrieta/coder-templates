@@ -119,7 +119,7 @@ data "coder_parameter" "workspace_image" {
   display_name = "Workspace image"
   description  = "Workspace container image (registry/repo:tag)"
   type         = "string"
-  default      = "ghcr.io/javierarrieta/coder-workspace:latest"
+  default      = "ghcr.io/javierarrieta/coder-workspace:20260818-0dce5e8"
   mutable      = true
 }
 
