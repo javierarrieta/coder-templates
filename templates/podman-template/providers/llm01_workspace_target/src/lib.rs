@@ -478,13 +478,25 @@ impl Resource for WorkspaceTargetResource {
                 },
             ))
         } else {
-            // Stopping: detach and release the lease. Keep the capability in
+            // Stopping: detach and release the lease. The stored capability
+            // may have been released or expired server-side (a prior stop, an
+            // expired lease, or a helper restart), in which case the helper
+            // rejects it with 403. acquire() is idempotent — it returns a fresh
+            // capability when the stored one is no longer valid — so re-acquire
+            // before detaching instead of failing hard. Keep the capability in
             // state so a later start can reacquire idempotently.
-            if let Err(err) = client.detach(&workspace, &existing_cap).await {
+            let capability = match client.acquire(&workspace, Some(&existing_cap)).await {
+                Ok(cap) => cap,
+                Err(err) => {
+                    diags.root_error_short(format!("reacquire failed: {}", err));
+                    return None;
+                }
+            };
+            if let Err(err) = client.detach(&workspace, &capability).await {
                 diags.root_error_short(format!("detach failed: {}", err));
                 return None;
             }
-            if let Err(err) = client.release(&workspace, &existing_cap).await {
+            if let Err(err) = client.release(&workspace, &capability).await {
                 diags.root_error_short(format!("release failed: {}", err));
                 return None;
             }
