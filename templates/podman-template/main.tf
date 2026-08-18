@@ -140,7 +140,7 @@ resource "docker_container" "workspace" {
     "CODER_AGENT_TOKEN=${coder_agent.main.token}",
   ]
 
-  command = ["sh", "-c", coder_agent.main.init_script]
+  command    = ["sh", "-c", coder_agent.main.init_script]
   depends_on = [llm01_workspace_target.workspace]
 }
 
