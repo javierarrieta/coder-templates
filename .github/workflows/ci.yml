@@ -84,10 +84,10 @@ jobs:
           provider_installation {
             filesystem_mirror {
               path    = "$HOME/.tf-mirror"
-              include = ["registry.l.arrieta.eu/*"]
+              include = ["registry.l.arrieta.eu/infra/llm01"]
             }
             direct {
-              exclude = ["registry.l.arrieta.eu/*"]
+              exclude = ["registry.l.arrieta.eu/infra/llm01"]
             }
           }
           EOF
