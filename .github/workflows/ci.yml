@@ -73,11 +73,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          PKG="$HOME/.tf-mirror/registry.l.arrieta.eu/infra/llm01/terraform-provider-llm01/0.1.1/linux_amd64"
+          PKG="$HOME/.tf-mirror/registry.l.arrieta.eu/infra/llm01/0.1.1/linux_amd64"
           mkdir -p "$PKG"
           cp .ci/llm01-provider/terraform-provider-llm01 "$PKG/terraform-provider-llm01_v0.1.1"
           chmod +x "$PKG/terraform-provider-llm01_v0.1.1"
-          (cd "$PKG" && sha256sum terraform-provider-llm01_v0.1.1 > terraform-provider-llm01_v0.1.1_SHA256SUMS)
           # Unquoted EOF: $HOME must expand at write time because Terraform
           # does NOT interpolate env vars inside its CLI config file.
           cat > "$HOME/.terraformrc" <<EOF
