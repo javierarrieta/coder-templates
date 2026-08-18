@@ -1,2 +1,5 @@
 # Rust build artifacts (llm01_workspace_target provider)
 target/
+
+# git worktrees
+.worktrees/
