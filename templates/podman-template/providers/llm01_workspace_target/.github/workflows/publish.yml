@@ -32,19 +32,19 @@ jobs:
       - name: Create zip (excluding target/)
         run: |
           cd release
-          zip -q terraform-provider-llm01_v0.1.1_linux_amd64.zip terraform-provider-llm01
+          zip -q terraform-provider-llm01_${{ github.event.release.tag_name }}_linux_amd64.zip terraform-provider-llm01
           ls -la
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: terraform-provider-llm01-v0.1.1-linux-amd64
-          path: release/terraform-provider-llm01_v0.1.1_linux_amd64.zip
+          name: terraform-provider-${{ github.event.release.tag_name }}-linux-amd64
+          path: release/terraform-provider-llm01_${{ github.event.release.tag_name }}_linux_amd64.zip
 
       - name: Create checksums
         run: |
           cd release
-          sha256sum terraform-provider-llm01_v0.1.1_linux_amd64.zip > terraform-provider-llm01_v0.1.1_linux_amd64_SHA256SUMS
+          sha256sum terraform-provider-llm01_${{ github.event.release.tag_name }}_linux_amd64.zip > terraform-provider-llm01_${{ github.event.release.tag_name }}_linux_amd64_SHA256SUMS
           ls -la
 
       - name: Upload checksums
