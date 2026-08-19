@@ -101,5 +101,5 @@ The binary must be signed with GPG before uploading to registry. Fingerprint:
 
 The signing key lives in a sops-encrypted K8s secret in the private k8s-casa
 repo (decryptable with the local sops age key). The signature must be a
-**binary** GPG signature (`gpg --sign`, no `--armor`); ASCII-armored signatures
+**binary, detached** GPG signature (`gpg --detach-sign`, no `--armor`); ASCII-armored signatures
 are rejected by the registry ("invalid data: tag byte does not have MSB set").

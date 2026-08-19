@@ -14,7 +14,7 @@
 - Version comes only from the release tag (`github.event.release.tag_name`), never from the image digest.
 - `v` prefix kept for: git tag, workflow input, artifact names. Stripped for: zip/SHA256SUMS/.sig file names, protocol JSON, pushed image tag.
 - Binary inside the zip keeps the `v` (`terraform-provider-llm01_v0.1.1`).
-- GPG signatures must be **binary** (`gpg --sign`, no `--armor`).
+- GPG signatures must be **binary and detached** (`gpg --detach-sign`, no `--armor`).
 - Existing registry content must be preserved (0.1.0 × linux/amd64, linux/arm64, darwin/arm64; 0.1.1 × linux/amd64).
 - No automatic k8s-casa bump — manual, after CI prints the published tag.
 - k8s-casa is Flux GitOps — no imperative kubectl.
@@ -253,7 +253,7 @@ Append after the existing "Upload checksums" step (before end of the `publish` j
           fi
           echo "$GPG_SIGNING_KEY" | gpg --batch --import
           cd release
-          gpg --batch --yes --pinentry-mode loopback --sign \
+          gpg --batch --yes --pinentry-mode loopback --detach-sign \
             --output terraform-provider-llm01_${{ steps.ver.outputs.bare }}_SHA256SUMS.sig \
             terraform-provider-llm01_${{ steps.ver.outputs.bare }}_SHA256SUMS
           ls -la

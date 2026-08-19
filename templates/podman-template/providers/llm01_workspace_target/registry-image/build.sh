@@ -51,6 +51,31 @@ for p in \
   curl -fsS --retry 3 "$base/$p" -o "$out"
 done
 
+# Existing versions' download JSONs may embed absolute URLs pointing at a
+# previous registry host (e.g. the pre-public LAN host). Rewrite all three URL
+# fields to the protocol host so every version serves URLs on the host the
+# clients are using. Idempotent when they already match.
+python3 - "$stage" "$base" <<'PYEOF'
+import json, sys, glob
+stage, base = sys.argv[1:3]
+for p in glob.glob(f"{stage}/v1/providers/infra/llm01/*/download/*/*"):
+    with open(p) as f:
+        data = json.load(f)
+    changed = False
+    for k in ("download_url", "shasums_url", "shasums_signature_url"):
+        u = data.get(k)
+        if isinstance(u, str) and u.startswith("https://"):
+            slash = u.find("/", len("https://"))
+            new = base + u[slash:] if slash != -1 else u
+            if new != u:
+                data[k] = new
+                changed = True
+    if changed:
+        with open(p, "w") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
+PYEOF
+
 echo "==> Adding new version $version"
 release="$here/../release"
 zip_file="terraform-provider-llm01_${version}_linux_amd64.zip"
