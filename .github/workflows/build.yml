@@ -33,32 +33,38 @@ jobs:
       - name: Build provider
         run: cargo build --release --bin terraform-provider-llm01
 
+      - name: Normalize version (strip leading v for registry file names)
+        id: ver
+        env:
+          VERSION: ${{ github.event.inputs.version }}
+        run: echo "bare=${VERSION#v}" >> "$GITHUB_OUTPUT"
+
       - name: Build binary release
         run: |
           mkdir -p release
-          cp target/release/terraform-provider-llm01 release/
+          cp target/release/terraform-provider-llm01 release/terraform-provider-llm01_v${{ steps.ver.outputs.bare }}
           ls -la release/
 
       - name: Create zip (excluding target/)
         run: |
           cd release
-          zip -q terraform-provider-llm01_${{ github.event.inputs.version }}_linux_amd64.zip terraform-provider-llm01
+          zip -q terraform-provider-llm01_${{ steps.ver.outputs.bare }}_linux_amd64.zip terraform-provider-llm01_v${{ steps.ver.outputs.bare }}
           ls -la
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: terraform-provider-${{ github.event.inputs.version }}-linux-amd64
-          path: templates/podman-template/providers/llm01_workspace_target/release/terraform-provider-llm01_${{ github.event.inputs.version }}_linux_amd64.zip
+          path: templates/podman-template/providers/llm01_workspace_target/release/terraform-provider-llm01_${{ steps.ver.outputs.bare }}_linux_amd64.zip
 
       - name: Create checksums
         run: |
           cd release
-          sha256sum terraform-provider-llm01_${{ github.event.inputs.version }}_linux_amd64.zip > terraform-provider-llm01_${{ github.event.inputs.version }}_linux_amd64_SHA256SUMS
+          sha256sum terraform-provider-llm01_${{ steps.ver.outputs.bare }}_linux_amd64.zip > terraform-provider-llm01_${{ steps.ver.outputs.bare }}_linux_amd64_SHA256SUMS
           ls -la
 
       - name: Upload checksums
         uses: actions/upload-artifact@v4
         with:
           name: terraform-provider-${{ github.event.inputs.version }}-checksums
-          path: templates/podman-template/providers/llm01_workspace_target/release/terraform-provider-llm01_${{ github.event.inputs.version }}_linux_amd64_SHA256SUMS
+          path: templates/podman-template/providers/llm01_workspace_target/release/terraform-provider-llm01_${{ steps.ver.outputs.bare }}_linux_amd64_SHA256SUMS
