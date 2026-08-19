@@ -14,7 +14,14 @@ host="${2:-CHANGE_ME}"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 stage="$here/html"
-mkdir -p "$stage/.well-known" "$stage/v1/providers/infra/llm01/0.1.0/download/linux/amd64" "$stage/v1/providers/infra/llm01/0.1.0/download/linux/arm64" "$stage/v1/providers/infra/llm01/0.1.0/download/darwin/arm64" "$stage/v1/providers/infra/llm01/0.1.1/download/linux/amd64" "$stage/files"
+# Paths under v1/.../download/<os>/<arch> are FILES (the protocol JSON), not
+# directories — so create only the <os> parents here; write_download() below
+# writes <arch> as a file.
+mkdir -p "$stage/.well-known" \
+  "$stage/v1/providers/infra/llm01/0.1.0/download/linux" \
+  "$stage/v1/providers/infra/llm01/0.1.0/download/darwin" \
+  "$stage/v1/providers/infra/llm01/0.1.1/download/linux" \
+  "$stage/files"
 
 base="https://$host"
 
@@ -55,19 +62,23 @@ cp "$release/$sums_file" "$stage/files/$sums_file"
 cp "$release/$sig_file" "$stage/files/$sig_file"
 
 zip_sha="$(awk '{print $1}' "$release/$sums_file" | head -1)"
-mkdir -p "$stage/v1/providers/infra/llm01/$version/download/linux/amd64"
+mkdir -p "$stage/v1/providers/infra/llm01/$version/download/linux"
 
 # Reuse the existing version's signing key (same key signs every version).
-gpg_armor="$(python3 -c '
-import json,sys
-d=json.load(open(sys.argv[1]))
-print(d["signing_keys"]["gpg_public_keys"][0]["ascii_armor"])
-' "$stage/v1/providers/infra/llm01/0.1.1/download/linux/amd64")"
+# key_id and ascii_armor are read directly from an existing version's download
+# JSON (below) rather than hardcoded, so a key rotation is picked up
+# automatically.
 
-python3 - "$version" "$zip_file" "$zip_sha" "$gpg_armor" "$stage" "$base" <<'PYEOF'
+python3 - "$version" "$zip_sha" "$stage" "$base" <<'PYEOF'
 import json, sys
 
-version, zip_file, zip_sha, gpg_armor, stage, base = sys.argv[1:7]
+version, zip_sha, stage, base = sys.argv[1:5]
+
+# Read the signing key (key_id + ascii_armor) from an existing download JSON.
+signing_path = f"{stage}/v1/providers/infra/llm01/0.1.1/download/linux/amd64"
+key = json.load(open(signing_path))["signing_keys"]["gpg_public_keys"][0]
+gpg_key_id = key["key_id"]
+gpg_armor = key["ascii_armor"]
 
 def write_download(os_, arch):
     data = {
@@ -81,7 +92,7 @@ def write_download(os_, arch):
         "shasum": zip_sha,
         "signing_keys": {
             "gpg_public_keys": [
-                {"key_id": "17DC83110709EC6A07A4C7D81667A87F5D80F5EB",
+                {"key_id": gpg_key_id,
                  "ascii_armor": gpg_armor},
             ]
         },
@@ -117,4 +128,4 @@ docker push "$tag"
 
 digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$tag" | awk -F'@' '{print $2}')"
 echo "==> NEW IMAGE DIGEST (bump in k8s-casa): $digest"
-echo "digest=$digest" >> "$GITHUB_OUTPUT"
+echo "digest=$digest" >> "${GITHUB_OUTPUT:-/dev/null}"
