@@ -66,13 +66,15 @@ The binary is published to private registry:
 The registry is an nginx + Docker registry. The Terraform provider protocol
 (`/.well-known/`, `/v1/providers/`, `/files/`) is served by a **static nginx**
 deployment whose `/files/` content is **baked into the image** (pushed to the
-private Docker registry), not a mounted volume. Publishing therefore means:
+private Docker registry), not a mounted volume. `publish.yml` now does this
+automatically on release:
 
-1. Build the zip + `SHA256SUMS` + binary `.sig` (see GPG Signing).
-2. Bake the protocol JSON + files into a new registry-image and push it to the
-   private Docker registry.
-3. Bump the image digest in the k8s-casa deployment manifest and push — Flux
-   GitOps deploys it. No imperative kubectl changes (see k8s-casa/AGENTS.md).
+1. `publish.yml` builds the zip + `SHA256SUMS`, GPG-signs the checksums
+   (binary `.sig`), and uploads them as Actions artifacts.
+2. `registry-image/build.sh` downloads the existing registry content, adds the
+   new version's files + protocol JSON, builds and pushes a new registry image.
+3. The workflow prints the new image digest; bump it in the k8s-casa
+   deployment manifest and push — Flux GitOps deploys it.
 
 There is **no** direct file upload endpoint: `PUT` to `/files/` returns 404.
 

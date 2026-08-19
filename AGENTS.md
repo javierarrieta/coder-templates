@@ -227,11 +227,10 @@ the zip keeps it (`terraform-provider-llm01_v0.1.1`) — the Terraform registry
 convention. The CI workflows (`build.yml` manual, `publish.yml` release)
 normalize the version by stripping the leading `v` for file names.
 
-**CI reality:** `build.yml`/`publish.yml` only build, sign-ready zip +
-SHA256SUMS, and upload them as **GitHub Actions artifacts** (Actions tab of the
-run; NOT release assets, NOT pushed to the registry). They do not GPG-sign or
-publish. Publishing to the registry is currently a manual image-bake process
-(see below).
+**CI reality:** `publish.yml` builds, signs, packages, **and pushes a new
+registry image** (`registry-image/build.sh`) on release; `build.yml` (manual
+trigger) only uploads Actions artifacts. The workflow prints the new image
+digest; the k8s-casa deployment-manifest bump stays manual.
 
 **How the registry is served:** the registry is an nginx + Docker registry
 (hostname in the provider source in `main.tf`). The Terraform provider protocol
@@ -256,7 +255,7 @@ Registry protocol layout (modern protocol, v5.0):
 - `/files/terraform-provider-llm01_{version}_SHA256SUMS`
 - `/files/terraform-provider-llm01_{version}_SHA256SUMS.sig`
 
-**Distribution steps (current manual process):**
+**Distribution steps (manual fallback only):**
 
 1. Build: `cargo build --release --bin terraform-provider-llm01`
 2. Create `terraform-provider-llm01_0.1.1_linux_amd64.zip` containing the binary
