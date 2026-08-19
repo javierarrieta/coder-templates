@@ -56,11 +56,49 @@ jobs:
       - name: Create checksums
         run: |
           cd release
-          sha256sum terraform-provider-llm01_${{ steps.ver.outputs.bare }}_linux_amd64.zip > terraform-provider-llm01_${{ steps.ver.outputs.bare }}_linux_amd64_SHA256SUMS
+          sha256sum terraform-provider-llm01_${{ steps.ver.outputs.bare }}_linux_amd64.zip > terraform-provider-llm01_${{ steps.ver.outputs.bare }}_SHA256SUMS
           ls -la
 
       - name: Upload checksums
         uses: actions/upload-artifact@v4
         with:
           name: terraform-provider-${{ github.event.release.tag_name }}-checksums
-          path: templates/podman-template/providers/llm01_workspace_target/release/terraform-provider-llm01_${{ steps.ver.outputs.bare }}_linux_amd64_SHA256SUMS
+          path: templates/podman-template/providers/llm01_workspace_target/release/terraform-provider-llm01_${{ steps.ver.outputs.bare }}_SHA256SUMS
+
+      - name: Sign SHA256SUMS (binary GPG)
+        env:
+          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+        run: |
+          if [[ -z "$GPG_SIGNING_KEY" ]]; then
+            echo "::error::GPG_SIGNING_KEY secret not configured; skipping publish"
+            exit 1
+          fi
+          echo "$GPG_SIGNING_KEY" | gpg --batch --import
+          cd release
+          gpg --batch --yes --pinentry-mode loopback --sign \
+            --output terraform-provider-llm01_${{ steps.ver.outputs.bare }}_SHA256SUMS.sig \
+            terraform-provider-llm01_${{ steps.ver.outputs.bare }}_SHA256SUMS
+          ls -la
+
+      - name: Login to registry
+        run: |
+          echo "$REGISTRY_TOKEN" | docker login "$REGISTRY_HOST" --username "$REGISTRY_USER" --password-stdin
+        env:
+          REGISTRY_HOST: ${{ secrets.REGISTRY_HOST }}
+          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+
+      - name: Build and push registry image
+        id: registry
+        run: |
+          bash registry-image/build.sh "${{ steps.ver.outputs.bare }}" "$REGISTRY_HOST"
+        env:
+          REGISTRY_HOST: ${{ secrets.REGISTRY_HOST }}
+          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          GITHUB_OUTPUT: $GITHUB_OUTPUT
+
+      - name: Show new image digest
+        run: |
+          echo "New registry image digest: ${{ steps.registry.outputs.digest }}"
+          echo "Bump this in the k8s-casa terraform-provider-registry deployment manifest, commit, and let Flux deploy."
