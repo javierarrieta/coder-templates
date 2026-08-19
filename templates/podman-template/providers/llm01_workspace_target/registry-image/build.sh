@@ -135,14 +135,19 @@ def write_download(os_, arch):
 write_download("linux", "amd64")
 
 # Add the new version to the versions listing.
+import glob
 versions_path = f"{stage}/v1/providers/infra/llm01/versions"
-with open(versions_path) as f:
-    versions = json.load(f)
-versions["versions"].append({
-    "version": version,
-    "protocols": ["5.0"],
-    "platforms": [{"os": "linux", "arch": "amd64"}],
-})
+by_version = {}
+for p in glob.glob(f"{stage}/v1/providers/infra/llm01/*/download/*/*"):
+    # p = .../llm01/<version>/download/<os>/<arch>
+    rel = p.replace(f"{stage}/v1/providers/infra/llm01/", "")
+    parts = rel.split("/")
+    ver, _dl, os_, arch = parts[0], parts[1], parts[2], parts[3]
+    entry = by_version.setdefault(
+        ver, {"version": ver, "protocols": ["5.0"], "platforms": []}
+    )
+    entry["platforms"].append({"os": os_, "arch": arch})
+versions = {"versions": [by_version[k] for k in sorted(by_version)]}
 with open(versions_path, "w") as f:
     json.dump(versions, f, indent=2)
     f.write("\n")
