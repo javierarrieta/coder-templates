@@ -243,8 +243,11 @@ returns 404). Publishing means:
 2. Bake the protocol JSON + files into a new registry-image and push it to the
    private Docker registry.
 3. Bump the image digest in the **k8s-casa** deployment manifest and push —
-   Flux GitOps deploys it. k8s-casa/AGENTS.md forbids imperative kubectl
-   changes. (Concrete namespaces/secret names live in k8s-casa only.)
+   Flux GitOps deploys it. Because the new image is pushed to the **public
+   registry host**, the bump commit must also add that host to the k8s-casa
+   registry **pull-credential** (`dockerconfigjson`) or the cluster cannot pull
+   the new image. k8s-casa/AGENTS.md forbids imperative kubectl changes.
+   (Concrete hostnames/namespaces/secret names live in k8s-casa only.)
 
 Registry protocol layout (modern protocol, v5.0):
 

@@ -74,7 +74,10 @@ automatically on release:
 2. `registry-image/build.sh` downloads the existing registry content, adds the
    new version's files + protocol JSON, builds and pushes a new registry image.
 3. The workflow prints the new image digest; bump it in the k8s-casa
-   deployment manifest and push — Flux GitOps deploys it.
+   deployment manifest and push — Flux GitOps deploys it. Because the new image
+   is pushed to the public registry host, the bump commit must also add that
+   host to the k8s-casa registry pull-credential (`dockerconfigjson`) or the
+   cluster cannot pull the image.
 
 There is **no** direct file upload endpoint: `PUT` to `/files/` returns 404.
 
