@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
+      packages: write
     defaults:
       run:
         working-directory: templates/podman-template/providers/llm01_workspace_target
@@ -80,25 +80,19 @@ jobs:
             terraform-provider-llm01_${{ steps.ver.outputs.bare }}_SHA256SUMS
           ls -la
 
-      - name: Login to registry
+      - name: Login to GHCR
         run: |
-          echo "$REGISTRY_TOKEN" | docker login "$REGISTRY_HOST" --username "$REGISTRY_USER" --password-stdin
-        env:
-          REGISTRY_HOST: ${{ secrets.REGISTRY_HOST }}
-          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
-          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Build and push registry image
         id: registry
         run: |
-          bash registry-image/build.sh "${{ steps.ver.outputs.bare }}" "$REGISTRY_HOST"
+          bash registry-image/build.sh "${{ steps.ver.outputs.bare }}" "$PROTOCOL_HOST"
         env:
-          REGISTRY_HOST: ${{ secrets.REGISTRY_HOST }}
-          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
-          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          PROTOCOL_HOST: ${{ secrets.PROTOCOL_HOST }}
           GITHUB_OUTPUT: $GITHUB_OUTPUT
 
       - name: Show new image digest
         run: |
           echo "New registry image digest: ${{ steps.registry.outputs.digest }}"
-          echo "Bump this in the k8s-casa terraform-provider-registry deployment manifest, commit, and let Flux deploy."
+          echo "Bump this in the k8s-casa terraform-provider-registry deployment manifest (image: ghcr.io/javierarrieta/terraform-provider-registry@sha256:...), commit, and let Flux deploy."

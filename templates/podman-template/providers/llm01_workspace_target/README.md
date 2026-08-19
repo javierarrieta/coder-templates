@@ -72,12 +72,11 @@ automatically on release:
 1. `publish.yml` builds the zip + `SHA256SUMS`, GPG-signs the checksums
    (binary `.sig`), and uploads them as Actions artifacts.
 2. `registry-image/build.sh` downloads the existing registry content, adds the
-   new version's files + protocol JSON, builds and pushes a new registry image.
+   new version's files + protocol JSON, builds and pushes a new registry image
+   to public GHCR (`ghcr.io/javierarrieta/terraform-provider-registry`).
 3. The workflow prints the new image digest; bump it in the k8s-casa
-   deployment manifest and push — Flux GitOps deploys it. Because the new image
-   is pushed to the public registry host, the bump commit must also add that
-   host to the k8s-casa registry pull-credential (`dockerconfigjson`) or the
-   cluster cannot pull the image.
+   deployment manifest (image → `ghcr.io/javierarrieta/terraform-provider-registry@sha256:<new>`) and push — Flux GitOps deploys it. GHCR images are
+   publicly pullable, so no k8s-casa pull-credential change is needed.
 
 There is **no** direct file upload endpoint: `PUT` to `/files/` returns 404.
 

@@ -55,7 +55,7 @@ SHA256SUMS.
 - `v` prefix is kept for: git tag, workflow input, artifact names.
 - `v` prefix is stripped for: zip/SHA256SUMS/.sig file names, registry protocol
   JSON (versions + download), the pushed image tag. So the image is pushed as
-  `<registry-host>/infra/terraform-provider-registry:0.1.1` (bare).
+  `ghcr.io/javierarrieta/terraform-provider-registry:0.1.1` (bare).
 - The binary inside the zip keeps the `v` (`terraform-provider-llm01_v0.1.1`).
 
 ### 1. k8s-casa: expose the registry publicly
@@ -80,31 +80,36 @@ k8s-casa.)
   `/usr/share/nginx/html`; nginx config sets `default_type application/json`
   so the extensionless protocol JSON files serve as JSON; standard mime types
   for `/files/*` (`.zip`, `SHA256SUMS`, `.sig`).
-- **`build.sh`** — args: bare version (e.g. `0.1.1`), registry host, image name.
+- **`build.sh`** — args: bare version (e.g. `0.1.1`), protocol host, image name.
   1. Download the existing registry content (current `versions` JSON, each
      version's `download/{os}/{arch}` JSON, every `/files/*` file) from the
-     **public** registry host into a staging tree (GitHub-hosted runners
+     **public** protocol host into a staging tree (GitHub-hosted runners
      cannot reach the LAN-only host).
   2. Add the new version: `versions` JSON gains the new version entry; write
      the new `download/linux/amd64` JSON (reuse the GPG public key from an
      existing download JSON; `shasum` = sha256 of the new zip); copy the new
      zip, SHA256SUMS, `.sig` into `/files/`.
-  3. `docker build -t <registry-host>/infra/terraform-provider-registry:<bare-version>`.
+  3. `docker build -t ghcr.io/javierarrieta/terraform-provider-registry:<bare-version>`
+     (also tagged `latest`).
   4. `docker push`.
 
 #### `publish.yml` additions (after the existing zip + SHA256SUMS steps)
 
 1. **GPG sign**: import the signing key from `GPG_SIGNING_KEY` secret, create
    the **binary** `.sig` of SHA256SUMS.
-2. **Build + push the registry image**: run `registry-image/build.sh <bare>`.
+2. **Build + push the registry image**: login to GHCR with `GITHUB_TOKEN`
+   (`packages: write` permission), run `registry-image/build.sh <bare>
+   <protocol-host>`.
 3. **Print the new image digest** (`docker inspect --format '{{.RepoDigests}}'`
    or `docker images --digests`) in the run summary for the manual k8s-casa
    bump. Nothing else writes to k8s-casa.
 
 #### GitHub secrets required
 
-- `REGISTRY_USER` / `REGISTRY_TOKEN` — the push-capable htpasswd user.
+- `PROTOCOL_HOST` — the public registry protocol host (redacted from this repo;
+  used by `build.sh` for downloads and absolute URLs).
 - `GPG_SIGNING_KEY` — the private key (base64 or armored).
+- GHCR push uses the automatic `GITHUB_TOKEN` — no additional registry secrets.
 
 ### 3. Manual step (unchanged process)
 

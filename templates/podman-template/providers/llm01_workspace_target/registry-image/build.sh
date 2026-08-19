@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: build.sh <bare-version> [registry-host]
-# Downloads the current registry content from the public host, adds the new
-# version's files/protocol JSON, builds and pushes the registry image, and
-# prints the pushed image digest (for the manual k8s-casa bump).
+# Usage: build.sh <bare-version> [protocol-host]
+# Downloads the current registry content from the public protocol host, adds
+# the new version's files/protocol JSON, builds and pushes the registry image
+# to GHCR (ghcr.io/javierarrieta/terraform-provider-registry), and prints the
+# pushed image digest (for the manual k8s-casa bump).
 #
-# Redaction note: the concrete public registry host is not committed here; it
-# is passed as an argument and defaults to a placeholder that CI overrides.
+# Redaction note: the concrete protocol host is not committed here; it is
+# passed as an argument and defaults to a placeholder that CI overrides. The
+# image repository is public (GHCR), so it is safe to hardcode.
 
-version="${1:?usage: build.sh <bare-version> [registry-host]}"
-host="${2:-CHANGE_ME}"
+version="${1:?usage: build.sh <bare-version> [protocol-host]}"
+protocol_host="${2:-CHANGE_ME}"
+image_repo="ghcr.io/javierarrieta/terraform-provider-registry"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 stage="$here/html"
@@ -23,7 +26,7 @@ mkdir -p "$stage/.well-known" \
   "$stage/v1/providers/infra/llm01/0.1.1/download/linux" \
   "$stage/files"
 
-base="https://$host"
+base="https://$protocol_host"
 
 echo "==> Downloading existing registry content from $base"
 for p in \
@@ -120,11 +123,13 @@ with open(versions_path, "w") as f:
 PYEOF
 
 echo "==> Building image"
-tag="$host/infra/terraform-provider-registry:$version"
-docker build -t "$tag" "$here"
+tag="$image_repo:$version"
+latest_tag="$image_repo:latest"
+docker build -t "$tag" -t "$latest_tag" "$here"
 
 echo "==> Pushing image"
 docker push "$tag"
+docker push "$latest_tag"
 
 digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$tag" | awk -F'@' '{print $2}')"
 echo "==> NEW IMAGE DIGEST (bump in k8s-casa): $digest"

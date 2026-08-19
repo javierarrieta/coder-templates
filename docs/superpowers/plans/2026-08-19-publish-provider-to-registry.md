@@ -77,7 +77,7 @@ git commit -m "feat(registry-image): add Dockerfile and nginx config for provide
 
 **Interfaces:**
 - Consumes: Task 1's `Dockerfile` + `nginx.conf`. The workflow passes a staged zip at `release/terraform-provider-llm01_<bare>_linux_amd64.zip`, `release/terraform-provider-llm01_<bare>_SHA256SUMS`, and a binary `.sig` (created by Task 3) at `release/terraform-provider-llm01_<bare>_SHA256SUMS.sig`.
-- Produces: `build.sh <bare-version>` — assembles `registry-image/html/` (downloaded existing content + new version), builds and pushes `<registry-host>/infra/terraform-provider-registry:<bare>`, then prints the pushed digest. Exit non-zero on any download/push failure.
+- Produces: `build.sh <bare-version> [protocol-host]` — assembles `registry-image/html/` (downloaded existing content + new version), builds and pushes `ghcr.io/javierarrieta/terraform-provider-registry:<bare>` (plus `latest`), then prints the pushed digest. Exit non-zero on any download/push failure.
 
 - [ ] **Step 1: Write `build.sh`**
 
@@ -85,16 +85,18 @@ git commit -m "feat(registry-image): add Dockerfile and nginx config for provide
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: build.sh <bare-version> [registry-host]
-# Downloads the current registry content from the public host, adds the new
-# version's files/protocol JSON, builds and pushes the registry image, and
-# prints the pushed image digest (for the manual k8s-casa bump).
+# Usage: build.sh <bare-version> [protocol-host]
+# Downloads the current registry content from the public protocol host, adds
+# the new version's files/protocol JSON, builds and pushes the registry image
+# to GHCR (ghcr.io/javierarrieta/terraform-provider-registry), and prints the
+# pushed image digest (for the manual k8s-casa bump).
 #
-# Redaction note: the concrete public registry host is not committed here; it
-# is passed as an argument and defaults to a placeholder that CI overrides.
+# Redaction note: the concrete protocol host is not committed here; it is
+# passed as an argument and defaults to a placeholder that CI overrides.
 
-version="${1:?usage: build.sh <bare-version> [registry-host]}"
-host="${2:-CHANGE_ME}"
+version="${1:?usage: build.sh <bare-version> [protocol-host]}"
+protocol_host="${2:-CHANGE_ME}"
+image_repo="ghcr.io/javierarrieta/terraform-provider-registry"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 stage="$here/html"
@@ -193,11 +195,13 @@ with open(versions_path, "w") as f:
 PYEOF
 
 echo "==> Building image"
-tag="$host/infra/terraform-provider-registry:$version"
-docker build -t "$tag" "$here"
+tag="$image_repo:$version"
+latest_tag="$image_repo:latest"
+docker build -t "$tag" -t "$latest_tag" "$here"
 
 echo "==> Pushing image"
 docker push "$tag"
+docker push "$latest_tag"
 
 digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$tag" | awk -F'@' '{print $2}')"
 echo "==> NEW IMAGE DIGEST (bump in k8s-casa): $digest"
@@ -224,7 +228,7 @@ git commit -m "feat(registry-image): add build.sh to assemble, build, and push r
 - Modify: `.github/workflows/publish.yml` (after the "Upload checksums" step, add the new steps; no change to existing steps).
 
 **Interfaces:**
-- Consumes: Task 2's `build.sh`; the release zip/SHA256SUMS produced by the existing steps; GitHub secrets `GPG_SIGNING_KEY`, `REGISTRY_USER`, `REGISTRY_TOKEN`; the public registry host.
+- Consumes: Task 2's `build.sh`; the release zip/SHA256SUMS produced by the existing steps; GitHub secrets `GPG_SIGNING_KEY`, `PROTOCOL_HOST` (the public protocol host); GHCR push uses the automatic `GITHUB_TOKEN` (needs `packages: write` in the job `permissions`).
 - Produces: the `.sig` file on disk (fed to `build.sh`), a pushed image, and the digest printed to the run summary + `$GITHUB_OUTPUT`.
 
 - [ ] **Step 1: Add the new steps to `publish.yml`**
@@ -250,28 +254,22 @@ Append after the existing "Upload checksums" step (before end of the `publish` j
       - name: Build and push registry image
         id: registry
         run: |
-          bash registry-image/build.sh "${{ steps.ver.outputs.bare }}" "$REGISTRY_HOST"
+          bash registry-image/build.sh "${{ steps.ver.outputs.bare }}" "$PROTOCOL_HOST"
         env:
-          REGISTRY_HOST: ${{ secrets.REGISTRY_HOST }}
-          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
-          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          PROTOCOL_HOST: ${{ secrets.PROTOCOL_HOST }}
           GITHUB_OUTPUT: $GITHUB_OUTPUT
 ```
 
-Note: `build.sh` needs to be invoked from the working directory. The job already sets `defaults.run.working-directory` to `templates/podman-template/providers/llm01_workspace_target`, so `registry-image/build.sh` resolves correctly. The `release/` dir referenced by `build.sh` is resolved by `build.sh` itself as `<crate-root>/release/` (its `$here` is `<crate-root>/registry-image`, so `../release` → the crate root `release/`), matching where the existing zip/checksum steps write.
+Note: `build.sh` needs to be invoked from the working directory. The job already sets `defaults.run.working-directory` to `templates/podman-template/providers/llm01_workspace_target`, so `registry-image/build.sh` resolves correctly. The `release/` dir referenced by `build.sh` is resolved by `build.sh` itself as `<crate-root>/release/` (its `$here` is `<crate-root>/registry-image`, so `../release` → the crate root `release/`), matching where the existing zip/checksum steps write. Add `packages: write` to the job's `permissions` block (GHCR push).
 
 - [ ] **Step 2: Docker login before push**
 
-Add a Docker login step immediately before the "Build and push registry image" step (the private registry requires htpasswd auth):
+Add a Docker login step immediately before the "Build and push registry image" step (GHCR auth via the automatic token):
 
 ```yaml
-      - name: Login to registry
+      - name: Login to GHCR
         run: |
-          echo "$REGISTRY_TOKEN" | docker login "$REGISTRY_HOST" --username "$REGISTRY_USER" --password-stdin
-        env:
-          REGISTRY_HOST: ${{ secrets.REGISTRY_HOST }}
-          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
-          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 ```
 
 - [ ] **Step 3: Print digest in run summary**
