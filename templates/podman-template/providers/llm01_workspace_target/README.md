@@ -25,8 +25,8 @@ gh release create v0.1.1 --generate-notes
 ## Artifacts
 
 After successful build, two artifacts are uploaded to the workflow run's
-**Artifacts** tab (they are NOT release assets and are NOT pushed to the
-registry):
+**Artifacts** tab (they are NOT GitHub Release assets; the same files are baked
+into the new registry image by `build.sh`):
 
 1. `terraform-provider-llm01_0.1.1_linux_amd64.zip` - The binary
 2. `terraform-provider-llm01_0.1.1_linux_amd64_SHA256SUMS` - SHA256 checksum
