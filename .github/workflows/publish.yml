@@ -23,6 +23,9 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - name: Build provider
         run: cargo build --release --bin terraform-provider-llm01
 
@@ -53,5 +56,5 @@ jobs:
       - name: Upload checksums
         uses: actions/upload-artifact@v4
         with:
-          name: terraform-provider-llm01-checksums
-          path: templates/podman-template/providers/llm01_workspace_target/release/*.SHA256SUMS
+          name: terraform-provider-${{ github.event.release.tag_name }}-checksums
+          path: templates/podman-template/providers/llm01_workspace_target/release/terraform-provider-llm01_${{ github.event.release.tag_name }}_linux_amd64_SHA256SUMS
