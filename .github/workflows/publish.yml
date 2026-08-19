@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
+      packages: write
     defaults:
       run:
         working-directory: templates/podman-template/providers/llm01_workspace_target
@@ -29,32 +29,71 @@ jobs:
       - name: Build provider
         run: cargo build --release --bin terraform-provider-llm01
 
+      - name: Normalize version (strip leading v for registry file names)
+        id: ver
+        env:
+          VERSION: ${{ github.event.release.tag_name }}
+        run: echo "bare=${VERSION#v}" >> "$GITHUB_OUTPUT"
+
       - name: Build binary release
         run: |
           mkdir -p release
-          cp target/release/terraform-provider-llm01 release/
+          cp target/release/terraform-provider-llm01 release/terraform-provider-llm01_v${{ steps.ver.outputs.bare }}
           ls -la release/
 
       - name: Create zip (excluding target/)
         run: |
           cd release
-          zip -q terraform-provider-llm01_${{ github.event.release.tag_name }}_linux_amd64.zip terraform-provider-llm01
+          zip -q terraform-provider-llm01_${{ steps.ver.outputs.bare }}_linux_amd64.zip terraform-provider-llm01_v${{ steps.ver.outputs.bare }}
           ls -la
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: terraform-provider-${{ github.event.release.tag_name }}-linux-amd64
-          path: templates/podman-template/providers/llm01_workspace_target/release/terraform-provider-llm01_${{ github.event.release.tag_name }}_linux_amd64.zip
+          path: templates/podman-template/providers/llm01_workspace_target/release/terraform-provider-llm01_${{ steps.ver.outputs.bare }}_linux_amd64.zip
 
       - name: Create checksums
         run: |
           cd release
-          sha256sum terraform-provider-llm01_${{ github.event.release.tag_name }}_linux_amd64.zip > terraform-provider-llm01_${{ github.event.release.tag_name }}_linux_amd64_SHA256SUMS
+          sha256sum terraform-provider-llm01_${{ steps.ver.outputs.bare }}_linux_amd64.zip > terraform-provider-llm01_${{ steps.ver.outputs.bare }}_SHA256SUMS
           ls -la
 
       - name: Upload checksums
         uses: actions/upload-artifact@v4
         with:
           name: terraform-provider-${{ github.event.release.tag_name }}-checksums
-          path: templates/podman-template/providers/llm01_workspace_target/release/terraform-provider-llm01_${{ github.event.release.tag_name }}_linux_amd64_SHA256SUMS
+          path: templates/podman-template/providers/llm01_workspace_target/release/terraform-provider-llm01_${{ steps.ver.outputs.bare }}_SHA256SUMS
+
+      - name: Sign SHA256SUMS (binary GPG)
+        env:
+          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+        run: |
+          if [[ -z "$GPG_SIGNING_KEY" ]]; then
+            echo "::error::GPG_SIGNING_KEY secret not configured; skipping publish"
+            exit 1
+          fi
+          echo "$GPG_SIGNING_KEY" | gpg --batch --import
+          cd release
+          gpg --batch --yes --pinentry-mode loopback --sign \
+            --output terraform-provider-llm01_${{ steps.ver.outputs.bare }}_SHA256SUMS.sig \
+            terraform-provider-llm01_${{ steps.ver.outputs.bare }}_SHA256SUMS
+          ls -la
+
+      - name: Login to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push registry image
+        id: registry
+        run: |
+          bash registry-image/build.sh "${{ steps.ver.outputs.bare }}" "$PROTOCOL_HOST"
+        env:
+          PROTOCOL_HOST: ${{ secrets.PROTOCOL_HOST }}
+          GITHUB_OUTPUT: $GITHUB_OUTPUT
+
+      - name: Show published image tag
+        run: |
+          echo "Published image: ghcr.io/javierarrieta/terraform-provider-registry:${{ steps.ver.outputs.bare }}"
+          echo "Digest: ${{ steps.registry.outputs.digest }}"
+          echo "Reference the immutable tag in the k8s-casa terraform-provider-registry deployment manifest, commit, and let Flux deploy."

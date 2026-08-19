@@ -220,25 +220,68 @@ and published to the private registry `registry.l.arrieta.eu/infra/llm01` as
 `terraform-provider-llm01_0.1.1_linux_amd64.zip` with SHA256 checksum and
 binary GPG signature.
 
-**Distribution steps:**
+**Version naming (unified):** the `v` prefix is only used in git tags and
+workflow inputs (`v0.1.1`). Registry-facing file names strip it
+(`terraform-provider-llm01_0.1.1_linux_amd64.zip`), but the binary **inside**
+the zip keeps it (`terraform-provider-llm01_v0.1.1`) — the Terraform registry
+convention. The CI workflows (`build.yml` manual, `publish.yml` release)
+normalize the version by stripping the leading `v` for file names.
+
+**CI reality:** `publish.yml` builds, signs, packages, **and pushes a new
+registry image** (`registry-image/build.sh`) on release; `build.yml` (manual
+trigger) only uploads Actions artifacts. The image goes to public **GHCR**
+(`ghcr.io/javierarrieta/terraform-provider-registry`) tagged with the **bare
+release version** (`:0.1.1`). **Tags are immutable** — `build.sh` refuses to
+overwrite an existing tag (and GitHub's immutable-tags package setting rejects
+it at the registry too); there is no `latest` tag. The k8s-casa
+deployment references the version tag.
+
+**How the registry is served:** the registry is an nginx + Docker registry
+(hostname in the provider source in `main.tf`). The Terraform provider protocol
+(`/.well-known/`, `/v1/providers/`, `/files/`) is served by a **static nginx**
+deployment whose `/files/` content is **baked into the image** (pushed to the
+private Docker registry) — no mounted volume, no upload endpoint (`PUT /files/`
+returns 404). Publishing means:
+
+1. Build the zip + SHA256SUMS + binary `.sig`.
+2. Bake the protocol JSON + files into a new registry-image and push it to
+   public **GHCR** (`ghcr.io/javierarrieta/terraform-provider-registry`).
+3. Reference the new image by its immutable version tag in the **k8s-casa**
+   deployment manifest (image → `ghcr.io/javierarrieta/terraform-provider-registry:<bare-version>`) and push — Flux GitOps deploys it. GHCR images are
+   publicly pullable, so no k8s-casa pull-credential change is needed.
+   k8s-casa/AGENTS.md forbids imperative kubectl changes. (Concrete
+   hostnames/namespaces/secret names live in k8s-casa only.)
+
+Registry protocol layout (modern protocol, v5.0):
+
+- `/.well-known/terraform.json` → `{"providers.v1":"/v1/providers/"}`
+- `/v1/providers/infra/llm01/versions`
+- `/v1/providers/infra/llm01/{version}/download/{os}/{arch}`
+- `/files/terraform-provider-llm01_{version}_{os}_{arch}.zip`
+- `/files/terraform-provider-llm01_{version}_SHA256SUMS`
+- `/files/terraform-provider-llm01_{version}_SHA256SUMS.sig`
+
+**Distribution steps (manual fallback only):**
 
 1. Build: `cargo build --release --bin terraform-provider-llm01`
 2. Create `terraform-provider-llm01_0.1.1_linux_amd64.zip` containing the binary
+   (renamed `terraform-provider-llm01_v0.1.1`)
 3. Create `terraform-provider-llm01_0.1.1_SHA256SUMS` with the SHA256 hash
-4. Decrypt GPG signing key from `sops-encrypted` K8s secret using age key
-   `age1wynx7pnkg8z6n20zxg2krecmgyy5gdlj6xrs2tmfjctefy2xwv3qa2v24g`
+4. Decrypt GPG signing key from the sops-encrypted K8s secret in k8s-casa (age
+   key in the local sops age key directory)
 5. Create **binary** GPG signature (no `--armor` flag): `gpg --sign`
-6. Upload to `/files/terraform-provider-llm01_0.1.1_linux_amd64.zip`,
-   `/files/terraform-provider-llm01_0.1.1_SHA256SUMS`,
-   `/files/terraform-provider-llm01_0.1.1_SHA256SUMS.sig`
-7. Terraform fetches via `registry.l.arrieta.eu/infra/llm01` with version `~> 0.1`
+6. Bake the protocol JSON + files into a new `terraform-provider-registry`
+   image, push it to public GHCR under the bare version tag (immutable), and
+   reference that tag in the k8s-casa manifest (Flux deploys)
+7. Terraform fetches the provider from the registry host in `main.tf` with
+   version `~> 0.1`
 8. Verify: `gpg --verify terraform-provider-llm01_0.1.1_SHA256SUMS.sig` (expect "Good signature")
 
 **Critical:** Use binary GPG signature, not ASCII-armored. ASCII-armored signatures
 are rejected as "invalid data: tag byte does not have MSB set". The Terraform
-provider client expects binary signatures. The GPG key is stored in K8s secrets
-via `sops-encrypted`, not in the repo. Fingerprint: `1667A87F5D80F5EB`
-(self-signed).
+provider client expects binary signatures. The GPG key is stored in k8s-casa's
+K8s secrets via `sops-encrypted`, not in this repo (fingerprint public in the
+registry's download JSON).
 
 ## Remote VS Code debugging notes (llm01)
 
