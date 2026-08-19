@@ -92,7 +92,8 @@ jobs:
           PROTOCOL_HOST: ${{ secrets.PROTOCOL_HOST }}
           GITHUB_OUTPUT: $GITHUB_OUTPUT
 
-      - name: Show new image digest
+      - name: Show published image tag
         run: |
-          echo "New registry image digest: ${{ steps.registry.outputs.digest }}"
-          echo "Bump this in the k8s-casa terraform-provider-registry deployment manifest (image: ghcr.io/javierarrieta/terraform-provider-registry@sha256:...), commit, and let Flux deploy."
+          echo "Published image: ghcr.io/javierarrieta/terraform-provider-registry:${{ steps.ver.outputs.bare }}"
+          echo "Digest: ${{ steps.registry.outputs.digest }}"
+          echo "Reference the immutable tag in the k8s-casa terraform-provider-registry deployment manifest, commit, and let Flux deploy."

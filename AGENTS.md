@@ -230,8 +230,11 @@ normalize the version by stripping the leading `v` for file names.
 **CI reality:** `publish.yml` builds, signs, packages, **and pushes a new
 registry image** (`registry-image/build.sh`) on release; `build.yml` (manual
 trigger) only uploads Actions artifacts. The image goes to public **GHCR**
-(`ghcr.io/javierarrieta/terraform-provider-registry`); the workflow prints the
-new image digest and the k8s-casa deployment-manifest bump stays manual.
+(`ghcr.io/javierarrieta/terraform-provider-registry`) tagged with the **bare
+release version** (`:0.1.1`). **Tags are immutable** — `build.sh` refuses to
+overwrite an existing tag (and GitHub's immutable-tags package setting rejects
+it at the registry too); there is no `latest` tag. The k8s-casa
+deployment references the version tag.
 
 **How the registry is served:** the registry is an nginx + Docker registry
 (hostname in the provider source in `main.tf`). The Terraform provider protocol
@@ -243,12 +246,11 @@ returns 404). Publishing means:
 1. Build the zip + SHA256SUMS + binary `.sig`.
 2. Bake the protocol JSON + files into a new registry-image and push it to
    public **GHCR** (`ghcr.io/javierarrieta/terraform-provider-registry`).
-3. Bump the image digest in the **k8s-casa** deployment manifest (image ref →
-   `ghcr.io/javierarrieta/terraform-provider-registry@sha256:<new>`) and push —
-   Flux GitOps deploys it. GHCR images are publicly pullable, so no k8s-casa
-   pull-credential change is needed. k8s-casa/AGENTS.md forbids imperative
-   kubectl changes. (Concrete hostnames/namespaces/secret names live in k8s-casa
-   only.)
+3. Reference the new image by its immutable version tag in the **k8s-casa**
+   deployment manifest (image → `ghcr.io/javierarrieta/terraform-provider-registry:<bare-version>`) and push — Flux GitOps deploys it. GHCR images are
+   publicly pullable, so no k8s-casa pull-credential change is needed.
+   k8s-casa/AGENTS.md forbids imperative kubectl changes. (Concrete
+   hostnames/namespaces/secret names live in k8s-casa only.)
 
 Registry protocol layout (modern protocol, v5.0):
 
@@ -269,8 +271,8 @@ Registry protocol layout (modern protocol, v5.0):
    key in the local sops age key directory)
 5. Create **binary** GPG signature (no `--armor` flag): `gpg --sign`
 6. Bake the protocol JSON + files into a new `terraform-provider-registry`
-   image, push it to public GHCR, and bump the image digest in the k8s-casa
-   manifest (Flux deploys)
+   image, push it to public GHCR under the bare version tag (immutable), and
+   reference that tag in the k8s-casa manifest (Flux deploys)
 7. Terraform fetches the provider from the registry host in `main.tf` with
    version `~> 0.1`
 8. Verify: `gpg --verify terraform-provider-llm01_0.1.1_SHA256SUMS.sig` (expect "Good signature")

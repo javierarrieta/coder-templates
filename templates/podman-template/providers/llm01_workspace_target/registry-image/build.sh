@@ -4,8 +4,9 @@ set -euo pipefail
 # Usage: build.sh <bare-version> [protocol-host]
 # Downloads the current registry content from the public protocol host, adds
 # the new version's files/protocol JSON, builds and pushes the registry image
-# to GHCR (ghcr.io/javierarrieta/terraform-provider-registry), and prints the
-# pushed image digest (for the manual k8s-casa bump).
+# to GHCR (ghcr.io/javierarrieta/terraform-provider-registry:<bare-version>),
+# and prints the pushed tag. Tags are immutable: the script refuses to
+# overwrite an existing tag.
 #
 # Redaction note: the concrete protocol host is not committed here; it is
 # passed as an argument and defaults to a placeholder that CI overrides. The
@@ -124,13 +125,20 @@ PYEOF
 
 echo "==> Building image"
 tag="$image_repo:$version"
-latest_tag="$image_repo:latest"
-docker build -t "$tag" -t "$latest_tag" "$here"
+docker build -t "$tag" "$here"
+
+# Tags are immutable: refuse to overwrite an existing tag. This is the
+# pipeline-level guarantee; GitHub's immutable-tags package setting is the
+# registry-level backstop (an overwrite push would be rejected there too).
+if docker manifest inspect "$tag" >/dev/null 2>&1; then
+  echo "ERROR: image tag $tag already exists on GHCR; tags are immutable, refusing to overwrite" >&2
+  exit 1
+fi
 
 echo "==> Pushing image"
 docker push "$tag"
-docker push "$latest_tag"
 
+echo "==> PUBLISHED IMAGE (reference this tag in k8s-casa): $tag"
 digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$tag" | awk -F'@' '{print $2}')"
-echo "==> NEW IMAGE DIGEST (bump in k8s-casa): $digest"
+echo "digest for reference: $digest"
 echo "digest=$digest" >> "${GITHUB_OUTPUT:-/dev/null}"

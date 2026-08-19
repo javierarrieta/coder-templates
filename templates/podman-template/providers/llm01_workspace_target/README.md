@@ -73,9 +73,11 @@ automatically on release:
    (binary `.sig`), and uploads them as Actions artifacts.
 2. `registry-image/build.sh` downloads the existing registry content, adds the
    new version's files + protocol JSON, builds and pushes a new registry image
-   to public GHCR (`ghcr.io/javierarrieta/terraform-provider-registry`).
-3. The workflow prints the new image digest; bump it in the k8s-casa
-   deployment manifest (image → `ghcr.io/javierarrieta/terraform-provider-registry@sha256:<new>`) and push — Flux GitOps deploys it. GHCR images are
+   to public GHCR (`ghcr.io/javierarrieta/terraform-provider-registry:<bare-version>`).
+   Tags are immutable — the script refuses to overwrite an existing tag and
+   there is no `latest`.
+3. The workflow prints the published tag; reference it in the k8s-casa
+   deployment manifest (image → `ghcr.io/javierarrieta/terraform-provider-registry:<bare-version>`) and push — Flux GitOps deploys it. GHCR images are
    publicly pullable, so no k8s-casa pull-credential change is needed.
 
 There is **no** direct file upload endpoint: `PUT` to `/files/` returns 404.

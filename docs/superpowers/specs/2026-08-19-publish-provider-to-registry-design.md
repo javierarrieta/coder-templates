@@ -89,9 +89,11 @@ k8s-casa.)
      the new `download/linux/amd64` JSON (reuse the GPG public key from an
      existing download JSON; `shasum` = sha256 of the new zip); copy the new
      zip, SHA256SUMS, `.sig` into `/files/`.
-  3. `docker build -t ghcr.io/javierarrieta/terraform-provider-registry:<bare-version>`
-     (also tagged `latest`).
-  4. `docker push`.
+  3. `docker build -t ghcr.io/javierarrieta/terraform-provider-registry:<bare-version>`.
+  4. **Immutability check** — refuse to push if the tag already exists on GHCR
+     (`docker manifest inspect`); GitHub's immutable-tags package setting is the
+     registry-level backstop. There is **no** `latest` tag.
+  5. `docker push`.
 
 #### `publish.yml` additions (after the existing zip + SHA256SUMS steps)
 
@@ -100,9 +102,8 @@ k8s-casa.)
 2. **Build + push the registry image**: login to GHCR with `GITHUB_TOKEN`
    (`packages: write` permission), run `registry-image/build.sh <bare>
    <protocol-host>`.
-3. **Print the new image digest** (`docker inspect --format '{{.RepoDigests}}'`
-   or `docker images --digests`) in the run summary for the manual k8s-casa
-   bump. Nothing else writes to k8s-casa.
+3. **Print the published tag** (`ghcr.io/javierarrieta/terraform-provider-registry:<bare-version>`) in the run summary for the manual k8s-casa bump;
+   the digest is printed for reference. Nothing else writes to k8s-casa.
 
 #### GitHub secrets required
 
@@ -113,9 +114,10 @@ k8s-casa.)
 
 ### 3. Manual step (unchanged process)
 
-After a successful publish run, bump the image digest in the k8s-casa
-`terraform-provider-registry` deployment manifest using the digest printed by
-the workflow, commit, and let Flux deploy.
+After a successful publish run, reference the published immutable tag in the
+k8s-casa `terraform-provider-registry` deployment manifest
+(`ghcr.io/javierarrieta/terraform-provider-registry:<bare-version>`), commit,
+and let Flux deploy.
 
 ## Testing
 
@@ -136,10 +138,9 @@ the workflow, commit, and let Flux deploy.
   are today on the LAN). Credentials must stay out of logs.
 - The nginx config is new (replaces the ad-hoc image). The registry protocol
   layout is verified against the live registry, but a mismatch would only show
-  up when the k8s-casa digest is bumped.
-- The push-capable htpasswd user grants push access to the whole private
-  registry (not just the provider-registry image); the GitHub secret must be
-  treated as sensitive.
+  up when the k8s-casa tag is bumped.
+- The GHCR push uses the automatic `GITHUB_TOKEN` (`packages: write`) scoped to
+  the workflow run; the `GPG_SIGNING_KEY` secret must be treated as sensitive.
 
 ## Out of scope
 

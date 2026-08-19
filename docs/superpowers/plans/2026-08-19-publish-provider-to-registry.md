@@ -4,7 +4,7 @@
 
 **Goal:** Make `publish.yml` build and push a new `terraform-provider-registry` image (with the released provider's zip/SHA256SUMS/.sig baked in) to the private Docker registry, so publishing is no longer a fully manual image-bake.
 
-**Architecture:** A new `registry-image/` dir in the provider crate contains a Dockerfile (nginx serving the Terraform registry protocol from `/usr/share/nginx/html`), a `build.sh` that assembles the file tree (downloads existing registry content from the public host, adds the new version) and builds/pushes the image, and a nginx config. `publish.yml` gains a GPG-sign step, runs `build.sh`, and prints the new image digest for the manual k8s-casa bump. Separately, the k8s-casa ingress gains a public host rule so GitHub runners can reach the registry.
+**Architecture:** A new `registry-image/` dir in the provider crate contains a Dockerfile (nginx serving the Terraform registry protocol from `/usr/share/nginx/html`), a `build.sh` that assembles the file tree (downloads existing registry content from the public host, adds the new version) and builds/pushes the image, and a nginx config. `publish.yml` gains a GPG-sign step, runs `build.sh`, and prints the published immutable tag for the manual k8s-casa bump. Separately, the k8s-casa ingress gains a public host rule so GitHub runners can reach the registry.
 
 **Tech Stack:** GitHub Actions, Bash, Docker/nginx, GPG, Terraform registry protocol v5.0.
 
@@ -16,7 +16,7 @@
 - Binary inside the zip keeps the `v` (`terraform-provider-llm01_v0.1.1`).
 - GPG signatures must be **binary** (`gpg --sign`, no `--armor`).
 - Existing registry content must be preserved (0.1.0 × linux/amd64, linux/arm64, darwin/arm64; 0.1.1 × linux/amd64).
-- No automatic k8s-casa bump — manual, after CI prints the digest.
+- No automatic k8s-casa bump — manual, after CI prints the published tag.
 - k8s-casa is Flux GitOps — no imperative kubectl.
 
 ---
@@ -77,7 +77,7 @@ git commit -m "feat(registry-image): add Dockerfile and nginx config for provide
 
 **Interfaces:**
 - Consumes: Task 1's `Dockerfile` + `nginx.conf`. The workflow passes a staged zip at `release/terraform-provider-llm01_<bare>_linux_amd64.zip`, `release/terraform-provider-llm01_<bare>_SHA256SUMS`, and a binary `.sig` (created by Task 3) at `release/terraform-provider-llm01_<bare>_SHA256SUMS.sig`.
-- Produces: `build.sh <bare-version> [protocol-host]` — assembles `registry-image/html/` (downloaded existing content + new version), builds and pushes `ghcr.io/javierarrieta/terraform-provider-registry:<bare>` (plus `latest`), then prints the pushed digest. Exit non-zero on any download/push failure.
+- Produces: `build.sh <bare-version> [protocol-host]` — assembles `registry-image/html/` (downloaded existing content + new version), builds and pushes `ghcr.io/javierarrieta/terraform-provider-registry:<bare>` (immutable tag; refuses to overwrite an existing one), then prints the published tag. Exit non-zero on any download/push failure.
 
 - [ ] **Step 1: Write `build.sh`**
 
@@ -88,8 +88,9 @@ set -euo pipefail
 # Usage: build.sh <bare-version> [protocol-host]
 # Downloads the current registry content from the public protocol host, adds
 # the new version's files/protocol JSON, builds and pushes the registry image
-# to GHCR (ghcr.io/javierarrieta/terraform-provider-registry), and prints the
-# pushed image digest (for the manual k8s-casa bump).
+# to GHCR (ghcr.io/javierarrieta/terraform-provider-registry:<bare-version>),
+# and prints the pushed tag. Tags are immutable: the script refuses to
+# overwrite an existing tag.
 #
 # Redaction note: the concrete protocol host is not committed here; it is
 # passed as an argument and defaults to a placeholder that CI overrides.
@@ -196,15 +197,21 @@ PYEOF
 
 echo "==> Building image"
 tag="$image_repo:$version"
-latest_tag="$image_repo:latest"
-docker build -t "$tag" -t "$latest_tag" "$here"
+docker build -t "$tag" "$here"
+
+# Tags are immutable: refuse to overwrite an existing tag (GitHub's
+# immutable-tags setting is the registry-level backstop).
+if docker manifest inspect "$tag" >/dev/null 2>&1; then
+  echo "ERROR: image tag $tag already exists on GHCR; refusing to overwrite" >&2
+  exit 1
+fi
 
 echo "==> Pushing image"
 docker push "$tag"
-docker push "$latest_tag"
 
+echo "==> PUBLISHED IMAGE (reference this tag in k8s-casa): $tag"
 digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$tag" | awk -F'@' '{print $2}')"
-echo "==> NEW IMAGE DIGEST (bump in k8s-casa): $digest"
+echo "digest for reference: $digest"
 echo "digest=$digest" >> "$GITHUB_OUTPUT"
 ```
 
@@ -277,10 +284,11 @@ Add a Docker login step immediately before the "Build and push registry image" s
 Add a final step after "Build and push registry image":
 
 ```yaml
-      - name: Show new image digest
+      - name: Show published image tag
         run: |
-          echo "New registry image digest: ${{ steps.registry.outputs.digest }}"
-          echo "Bump this in the k8s-casa terraform-provider-registry deployment manifest, commit, and let Flux deploy."
+          echo "Published image: ghcr.io/javierarrieta/terraform-provider-registry:${{ steps.ver.outputs.bare }}"
+          echo "Digest: ${{ steps.registry.outputs.digest }}"
+          echo "Reference the immutable tag in the k8s-casa terraform-provider-registry deployment manifest, commit, and let Flux deploy."
 ```
 
 - [ ] **Step 4: Validate YAML**
@@ -359,8 +367,9 @@ automatically on release:
 1. `publish.yml` builds the zip + `SHA256SUMS`, GPG-signs the checksums
    (binary `.sig`), and uploads them as Actions artifacts.
 2. `registry-image/build.sh` downloads the existing registry content, adds the
-   new version's files + protocol JSON, builds and pushes a new registry image.
-3. The workflow prints the new image digest; bump it in the k8s-casa
+   new version's files + protocol JSON, builds and pushes a new registry image
+   to public GHCR under an immutable version tag.
+3. The workflow prints the published tag; reference it in the k8s-casa
    deployment manifest and push — Flux GitOps deploys it.
 
 There is **no** direct file upload endpoint: `PUT` to `/files/` returns 404.
@@ -373,8 +382,11 @@ Change the "CI reality" paragraph's last sentence ("Publishing to the registry i
 ```markdown
 **CI reality:** `publish.yml` builds, signs, packages, **and pushes a new
 registry image** (`registry-image/build.sh`) on release; `build.yml` (manual
-trigger) only uploads Actions artifacts. The workflow prints the new image
-digest; the k8s-casa deployment-manifest bump stays manual.
+trigger) only uploads Actions artifacts. The image goes to public **GHCR**
+(`ghcr.io/javierarrieta/terraform-provider-registry`) tagged with the bare
+release version; **tags are immutable** (build.sh refuses to overwrite, and
+GitHub's immutable-tags setting rejects it at the registry); no `latest` tag.
+The k8s-casa deployment references the version tag.
 ```
 
 And update the "Distribution steps" heading to note the manual path is only a
@@ -393,10 +405,10 @@ git commit -m "docs: document CI-publish flow for provider registry"
 ## Self-Review
 
 **Spec coverage:**
-- Spec "Versioning" → Tasks 2/3 use `steps.ver.outputs.bare` (already normalized); image tag uses bare version; digest only printed, not used for naming. ✓
+- Spec "Versioning" → Tasks 2/3 use `steps.ver.outputs.bare` (already normalized); image tag uses bare version; tag only printed, not used for naming. ✓
 - Spec §1 (k8s-casa ingress) → Task 4. ✓
 - Spec §2 Dockerfile → Task 1; `build.sh` → Task 2; publish.yml steps → Task 3; GitHub secrets → Task 3 envs. ✓
-- Spec §3 manual bump → Task 3 prints digest + Task 4/5 reference it; no auto-bump. ✓
+- Spec §3 manual bump → Task 3 prints tag + Task 4/5 reference it; no auto-bump. ✓
 - Spec Testing → Task 4 Step 3 verifies public reachability; Task 2 uses the live registry layout (verified against actual 0.1.0/0.1.1 responses). ✓
 - Redaction constraint → no new hostname/namespace/secret-name strings in any new repo file; `build.sh` takes host as an arg with a `CHANGE_ME` default. ✓
 
