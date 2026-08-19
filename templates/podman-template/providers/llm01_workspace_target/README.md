@@ -5,18 +5,18 @@
 Trigger the build workflow with a specific version:
 
 ```bash
-gh workflow run build.yml -f version="v0.1.1"
+gh workflow run build.yml -f version="v0.1.3"
 ```
 
 ## Release Workflow (Auto on Release)
 
-Creating a GitHub **Release** (e.g., `v0.1.1`) triggers `publish.yml`, which
+Creating a GitHub **Release** (e.g., `v0.1.3`) triggers `publish.yml`, which
 builds, packages, and uploads the artifacts using the release tag for the
 version. Pushing a tag alone does NOT trigger it — the tag must be attached to
 a release:
 
 ```bash
-gh release create v0.1.1 --generate-notes
+gh release create v0.1.3 --generate-notes
 # or create the release from the GitHub UI
 ```
 
@@ -24,26 +24,35 @@ gh release create v0.1.1 --generate-notes
 
 ## Artifacts
 
-After successful build, two artifacts are uploaded to the workflow run's
-**Artifacts** tab (they are NOT GitHub Release assets; the same files are baked
-into the new registry image by `build.sh`):
+After successful build, the artifacts are uploaded to the workflow run's
+**Artifacts** tab (they are NOT GitHub Release assets; the same files are then
+baked into the new registry image by `build.sh` in step 2 below):
 
-1. `terraform-provider-llm01_0.1.1_linux_amd64.zip` - The binary
-2. `terraform-provider-llm01_0.1.1_linux_amd64_SHA256SUMS` - SHA256 checksum
+1. `terraform-provider-llm01_0.1.3_linux_amd64.zip` — the provider binary
+2. `terraform-provider-llm01_0.1.3_SHA256SUMS` — SHA256 checksum
+3. `terraform-provider-llm01_0.1.3_SHA256SUMS.sig` — detached GPG signature over the checksums
 
 ## Version naming (unified)
 
-The `v` prefix is only used in git tags and workflow inputs (e.g. `v0.1.1`).
+The `v` prefix is only used in git tags and workflow inputs (e.g. `v0.1.3`).
 Registry-facing file names strip it, while the binary **inside** the zip keeps
 it (Terraform registry convention):
 
 | Context | Example |
 |---|---|
-| Git tag / workflow input / artifact name | `v0.1.1` |
-| zip / SHA256SUMS / `.sig` file names | `terraform-provider-llm01_0.1.1_linux_amd64.zip` |
-| Binary inside the zip | `terraform-provider-llm01_v0.1.1` |
+| Git tag / workflow input / artifact name | `v0.1.3` |
+| zip / `SHA256SUMS` / `.sig` file names | `terraform-provider-llm01_0.1.3_linux_amd64.zip` |
+| Binary inside the zip | `terraform-provider-llm01_v0.1.3` |
 
 ## Manual Build Command
+
+This convenience command builds for the host toolchain. For release artifacts
+you should use the `build.yml` / `publish.yml` workflows instead, because those
+cross-compile a **fully static musl** binary (`x86_64-unknown-linux-musl`,
+`RUSTFLAGS="-C target-feature=+crt-static"`). The static build runs anywhere,
+including the glibc-less Coder provisioner — a plain `cargo build` here produces
+a dynamically-linked glibc binary that fails with `no such file or directory`
+in the provisioner.
 
 ```bash
 cd templates/podman-template/providers/llm01_workspace_target
@@ -52,10 +61,13 @@ cargo build --release --bin terraform-provider-llm01
 
 ## Binary Distribution
 
-The binary is published to private registry:
-- Registry: `registry.l.arrieta.eu/infra/llm01`
-- Package: `terraform-provider-llm01_0.1.1_linux_amd64`
-- Version: `~> 0.1`
+The binary is published to the provider registry served at
+`registry.l.arrieta.eu/infra/llm01` (an nginx fronting the GHCR-hosted
+registry image):
+- Package: `terraform-provider-llm01`
+- Version: `0.1.3` (the template requires `~> 0.1.3`; 0.1.1 ships a macOS
+  Mach-O binary in the `linux_amd64` zip, and 0.1.2 is dynamic glibc — both
+  fail in the provisioner, so 0.1.3 is the minimum).
 
 ### How the registry is served (publishing today)
 
@@ -63,14 +75,13 @@ The binary is published to private registry:
 > intentionally omitted. They live in the private k8s-casa repo (sops-encrypted
 > secrets) and the local sops age key directory.
 
-The registry is an nginx + Docker registry. The Terraform provider protocol
-(`/.well-known/`, `/v1/providers/`, `/files/`) is served by a **static nginx**
-deployment whose `/files/` content is **baked into the image** (pushed to the
-private Docker registry), not a mounted volume. `publish.yml` now does this
-automatically on release:
+The registry is an nginx serving the Terraform provider protocol and static
+`/files/` content that is **baked into the image** (pushed to **public GHCR**:
+`ghcr.io/javierarrieta/terraform-provider-registry:<bare-version>`), not a
+mounted volume. `publish.yml` does this automatically on release:
 
-1. `publish.yml` builds the zip + `SHA256SUMS`, GPG-signs the checksums
-   (binary `.sig`), and uploads them as Actions artifacts.
+1. `publish.yml` builds the zip + `SHA256SUMS`, creates a **binary detached**
+   GPG signature (`gpg --detach-sign`), and uploads them as Actions artifacts.
 2. `registry-image/build.sh` downloads the existing registry content, adds the
    new version's files + protocol JSON, builds and pushes a new registry image
    to public GHCR (`ghcr.io/javierarrieta/terraform-provider-registry:<bare-version>`).
