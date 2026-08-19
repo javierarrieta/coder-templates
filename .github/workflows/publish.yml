@@ -75,7 +75,7 @@ jobs:
           fi
           echo "$GPG_SIGNING_KEY" | gpg --batch --import
           cd release
-          gpg --batch --yes --pinentry-mode loopback --sign \
+          gpg --batch --yes --pinentry-mode loopback --detach-sign \
             --output terraform-provider-llm01_${{ steps.ver.outputs.bare }}_SHA256SUMS.sig \
             terraform-provider-llm01_${{ steps.ver.outputs.bare }}_SHA256SUMS
           ls -la

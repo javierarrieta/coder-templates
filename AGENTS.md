@@ -269,13 +269,13 @@ Registry protocol layout (modern protocol, v5.0):
 3. Create `terraform-provider-llm01_0.1.1_SHA256SUMS` with the SHA256 hash
 4. Decrypt GPG signing key from the sops-encrypted K8s secret in k8s-casa (age
    key in the local sops age key directory)
-5. Create **binary** GPG signature (no `--armor` flag): `gpg --sign`
+5. Create **binary, detached** GPG signature (no `--armor` flag): `gpg --detach-sign`
 6. Bake the protocol JSON + files into a new `terraform-provider-registry`
    image, push it to public GHCR under the bare version tag (immutable), and
    reference that tag in the k8s-casa manifest (Flux deploys)
 7. Terraform fetches the provider from the registry host in `main.tf` with
    version `~> 0.1`
-8. Verify: `gpg --verify terraform-provider-llm01_0.1.1_SHA256SUMS.sig` (expect "Good signature")
+8. Verify: `gpg --verify terraform-provider-llm01_0.1.1_SHA256SUMS.sig terraform-provider-llm01_0.1.1_SHA256SUMS` (expect "Good signature")
 
 **Critical:** Use binary GPG signature, not ASCII-armored. ASCII-armored signatures
 are rejected as "invalid data: tag byte does not have MSB set". The Terraform
