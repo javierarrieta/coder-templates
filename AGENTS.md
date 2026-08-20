@@ -219,7 +219,7 @@ podman exec coder-<workspace> ls -l /lib64/ld-linux-x86-64.so.2 /lib64/libstdc++
 - `cargo` (1.96 here; CI uses `dtolnay/rust-toolchain@stable`) builds the
   provider as a **static musl** binary: `cargo build --release
   --target x86_64-unknown-linux-musl` with `RUSTFLAGS="-C target-feature=+crt-static"`
-  in `templates/podman-template/providers/llm01_workspace_target/`. CI's
+  in `providers/llm01_workspace_target/`. CI's
   `Install protoc and musl` step pins `protoc 25.1` via `curl` and installs the
   small `musl-tools` package (with apt retries + `--no-install-recommends`) to
   avoid the `apt-get install protobuf-compiler` hang seen on the GitHub runners.

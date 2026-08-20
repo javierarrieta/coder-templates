@@ -11,7 +11,7 @@ private `registry.l.arrieta.eu` provider registry from the GitHub runner.
 ## Background / constraints
 
 - The provider lives at
-  `templates/podman-template/providers/llm01_workspace_target/` and currently
+  `providers/llm01_workspace_target/` and currently
   has **zero** unit tests; `cargo test` would compile but run nothing.
 - `templates/podman-template/main.tf` requires the `llm01` provider from the
   private registry `registry.l.arrieta.eu/infra/llm01` (`~> 0.1`). The standard
@@ -39,7 +39,7 @@ Triggers:
 #### Job `provider` (ubuntu-latest)
 
 `defaults.run.working-directory`:
-`templates/podman-template/providers/llm01_workspace_target`
+`providers/llm01_workspace_target`
 
 Steps:
 
@@ -51,7 +51,7 @@ Steps:
 5. `cargo test`
 6. `cargo build --release --bin terraform-provider-llm01`
 7. `actions/upload-artifact@v4` — upload
-   `templates/podman-template/providers/llm01_workspace_target/target/release/terraform-provider-llm01`
+   `providers/llm01_workspace_target/target/release/terraform-provider-llm01`
    as `llm01-provider-linux-amd64`
 
 #### Job `terraform` (ubuntu-latest, `needs: provider`)
@@ -95,7 +95,7 @@ and matches the Cargo package version.
 ### 2. Provider unit tests
 
 Add `#[cfg(test)] mod tests` at the end of
-`templates/podman-template/providers/llm01_workspace_target/src/lib.rs`.
+`providers/llm01_workspace_target/src/lib.rs`.
 
 Confirmed feasible from the `tf-provider 0.2.2` crate:
 
