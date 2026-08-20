@@ -8,9 +8,10 @@ terraform {
       source  = "kreuzwerker/docker"
       version = "~> 3.6"
     }
-    # NOTE: Update the source address to match your private provider registry.
+    # NOTE: The provider source host must match the registry that the workspace
+    # state was created under (the host in the registry's download_url).
     llm01 = {
-      source = "registry.l.arrieta.eu/infra/llm01"
+      source = "registry.home.arrieta.eu/infra/llm01"
       # 0.1.1 ships a macOS Mach-O binary in the linux_amd64 zip
       # (exec format error on provisioner init). 0.1.2 is dynamically
       # linked glibc (no such file or directory in the glibc-less

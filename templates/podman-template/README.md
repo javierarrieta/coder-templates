@@ -177,33 +177,14 @@ podman exec coder-<workspace> ls -l /lib64/ld-linux-x86-64.so.2 /lib64/libstdc++
 ## Providers
 
 - `coder/coder` and `kreuzwerker/docker` come from `registry.terraform.io`.
-- `registry.l.arrieta.eu/infra/llm01` is the pinned helper-client provider published to the private registry at `registry.l.arrieta.eu/infra/llm01`; checksums are committed in `.terraform.lock.hcl`.
+- `llm01` is the workspace-target helper client: source
+  `registry.home.arrieta.eu/infra/llm01`, version `~> 0.1.3`. The provider is
+  built CI as a **fully static musl** binary (`x86_64-unknown-linux-musl`,
+  `RUSTFLAGS="-C target-feature=+crt-static"`); it runs in the glibc-less
+  provisioner (0.1.1 ships a macOS Mach-O binary in the linux_amd64 zip, and
+  0.1.2 is dynamic glibc — both fail, so 0.1.3 is the minimum). It is served
+  from the public GHCR-hosted registry image; the GPG signing key fingerprint
+  is `17DC83110709EC6A07A4C7D81667A87F5D80F5EB`.
 
-### terraform-provider-llm01 v0.1.1 binary distribution
-
-The `llm01_workspace_target` Rust provider is built via `cargo build --release`
-in `providers/llm01_workspace_target/` and published to the private registry as
-`terraform-provider-llm01_0.1.1_linux_amd64.zip` with SHA256 checksum and
-binary GPG signature (not ASCII-armored). The private registry uses plain-HTTP
-with nginx ingress at `registry.l.arrieta.eu/infra/llm01`.
-
-**Distribution steps:**
-
-1. Build the provider: `cargo build --release --bin terraform-provider-llm01`
-2. Create `terraform-provider-llm01_0.1.1_linux_amd64.zip` containing **only the binary** (exclude `target/` directory from zip)
-3. Create `terraform-provider-llm01_0.1.1_SHA256SUMS` with the SHA256 hash
-4. Decrypt the GPG signing key from `sops-encrypted` K8s secret using the age key
-   `age1wynx7pnkg8z6n20zxg2krecmgyy5gdlj6xrs2tmfjctefy2xwv3qa2v24g`
-5. Create a **binary** GPG signature (no `--armor` flag) with `gpg --sign`
-6. Upload to the private registry: `/files/terraform-provider-llm01_0.1.1_linux_amd64.zip`,
-   `/files/terraform-provider-llm01_0.1.1_SHA256SUMS`, `/files/terraform-provider-llm01_0.1.1_SHA256SUMS.sig`
-7. Terraform will fetch via `registry.l.arrieta.eu/infra/llm01` with version `~> 0.1`
-8. Verify: `gpg --verify terraform-provider-llm01_0.1.1_SHA256SUMS.sig` (expect "Good signature")
-
-**Important:** Use binary GPG signature (not ASCII-armored). ASCII-armored signatures
-are detected as "invalid data: tag byte does not have MSB set" by the private registry.
-The Terraform provider client expects a binary signature.
-
-**Important:** The GPG signing key is stored in K8s secrets via `sops-encrypted` and
-fetched at runtime — not in the repo. The fingerprint is `1667A87F5D80F5EB`
-(self-signed).
+See `providers/llm01_workspace_target/README.md` for the full build + release
+(including the pinned `protoc 25.1` install and detached GPG signing steps).

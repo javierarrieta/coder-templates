@@ -62,7 +62,7 @@ cargo build --release --bin terraform-provider-llm01
 ## Binary Distribution
 
 The binary is published to the provider registry served at
-`registry.l.arrieta.eu/infra/llm01` (an nginx fronting the GHCR-hosted
+`registry.home.arrieta.eu/infra/llm01` (an nginx fronting the GHCR-hosted
 registry image):
 - Package: `terraform-provider-llm01`
 - Version: `0.1.3` (the template requires `~> 0.1.3`; 0.1.1 ships a macOS

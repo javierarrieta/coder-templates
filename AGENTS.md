@@ -184,8 +184,10 @@ podman exec coder-<workspace> ls -l /lib64/ld-linux-x86-64.so.2 /lib64/libstdc++
   (mTLS). The image is pulled from public GHCR — no registry pull credentials
   needed (the `coder-registry-pull` secret is no longer referenced).
 - The single-workspace lease + iSCSI target is acquired through the `llm01`
-  private provider (`registry.l.arrieta.eu/infra/llm01`). Update the source
-  address in `main.tf` to match your private registry.
+  provider (`registry.home.arrieta.eu/infra/llm01` — the host that serves the
+  provider's download_url). The source address in `main.tf` must match this;
+  a mismatch with the host recorded in the workspace state makes Terraform
+  treat them as different providers and fails init.
 
 ## The Rust provider (`llm01_workspace_target`)
 
@@ -223,8 +225,8 @@ podman exec coder-<workspace> ls -l /lib64/ld-linux-x86-64.so.2 /lib64/libstdc++
 The `llm01_workspace_target` Rust provider is built by CI as a **fully static
 musl** binary (`cargo build --release --target x86_64-unknown-linux-musl` with
 `RUSTFLAGS="-C target-feature=+crt-static"`, reqwest uses `rustls-tls` so no
-openssl/libc dependency remains) and published to the provider registry served
-at `registry.l.arrieta.eu/infra/llm01` as `terraform-provider-llm01_0.1.3_linux_amd64.zip`
+openssl/libc dependency remains) and published to the provider registry served at
+`registry.home.arrieta.eu/infra/llm01` as `terraform-provider-llm01_0.1.3_linux_amd64.zip`
 with SHA256 checksum and a binary detached GPG signature. The static binary
 runs in the glibc-less Coder provisioner; a plain `cargo build` (glibc dynamic)
 fails there with `no such file or directory`.
