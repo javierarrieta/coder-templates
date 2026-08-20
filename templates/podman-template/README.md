@@ -20,9 +20,13 @@ The built-in Coder provisioner runs the template and reaches the Podman host thr
 3. The helper provisions/attaches the target, and the Docker provider starts the container from the public GHCR image (no registry credentials needed), bind-mounting the iSCSI target at `/home/coder`.
 4. Stop/start preserves `/home/coder` (data on TrueNAS). Delete tears down the target + zvol.
 
-The container runs as non-root uid 1000 (`coder`) with `userns_mode = "keep-id"`
-under rootless Podman, so the container user maps to the Podman host user
-(uid 1000) that owns the home data. `/home/coder` is a **direct bind mount**
+The container runs as non-root uid 1000 (`coder`) with
+`userns_mode = "keep-id:uid=1000,gid=1000"` under rootless Podman. The `uid=`/
+`gid=` suffix forces the Podman host user (uid **27003** on the podman host) to
+map to container uid 1000, so `coder` and its `/home/coder` data (owned on the
+host by uid 27003) share one owner. Plain `keep-id` alone would map host
+27003 → container 27003 and leave the uid-1000 process stranded in the subuid
+range (host 101000). `/home/coder` is a **direct bind mount**
 (not a named volume): rootless Podman's named-volume auto-chown fails on
 network-backed mounts (`lchown <volume>/_data: operation not permitted`), and
 bind mounts are never chowned.

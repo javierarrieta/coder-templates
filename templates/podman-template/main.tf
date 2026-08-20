@@ -130,8 +130,14 @@ resource "docker_container" "workspace" {
   # Bind-mount the iSCSI-backed home directory directly instead of a named
   # volume. Rootless Podman chowns named volumes to the container user on first
   # use, which fails with EPERM on the iSCSI mount; bind mounts are never
-  # chowned. keep-id maps the container's uid 1000 to the podman host user
-  # (uid 1000), matching the ownership of the existing home data.
+  # chowned.
+  #
+  # keep-id maps the podman host user to the given container uid:gid. Plain
+  # "keep-id" maps host user -> container uid == host uid (here 27003), which
+  # does NOT match the process user (1000:1000); the process then falls into
+  # the subuid range (host 101000) and cannot access home data owned by the
+  # host user. "keep-id:uid=1000,gid=1000" forces host user -> container
+  # uid 1000 so the workspace user and its /home/coder data share one owner.
   mounts {
     target = "/home/coder"
     source = "/srv/coder/workspaces/coder-${data.coder_workspace.me.name}"
@@ -139,7 +145,7 @@ resource "docker_container" "workspace" {
   }
 
   user        = "1000:1000"
-  userns_mode = "keep-id"
+  userns_mode = "keep-id:uid=1000,gid=1000"
 
   env = [
     "CODER_AGENT_TOKEN=${coder_agent.main.token}",
