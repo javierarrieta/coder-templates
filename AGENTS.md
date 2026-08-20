@@ -210,20 +210,29 @@ podman exec coder-<workspace> ls -l /lib64/ld-linux-x86-64.so.2 /lib64/libstdc++
 
 - `terraform` and the `coder` CLI are NOT in this repo's environment; install
   `coder` (to push) and Terraform locally if you need to run plans.
-- `cargo` (1.92, Nix profile) builds the provider: `cargo build` in
-  `templates/podman-template/providers/llm01_workspace_target/`.
+- `cargo` (1.96 here; CI uses `dtolnay/rust-toolchain@stable`) builds the
+  provider as a **static musl** binary: `cargo build --release
+  --target x86_64-unknown-linux-musl` with `RUSTFLAGS="-C target-feature=+crt-static"`
+  in `templates/podman-template/providers/llm01_workspace_target/`. CI's
+  `Install protoc and musl` step pins `protoc 25.1` via `curl` and installs the
+  small `musl-tools` package (with apt retries + `--no-install-recommends`) to
+  avoid the `apt-get install protobuf-compiler` hang seen on the GitHub runners.
 
-### terraform-provider-llm01 v0.1.1 binary distribution (see README.md for full docs)
+### terraform-provider-llm01 v0.1.3 binary distribution (see README.md for full docs)
 
-The `llm01_workspace_target` Rust provider is built via `cargo build --release`
-and published to the private registry `registry.l.arrieta.eu/infra/llm01` as
-`terraform-provider-llm01_0.1.1_linux_amd64.zip` with SHA256 checksum and
-binary GPG signature.
+The `llm01_workspace_target` Rust provider is built by CI as a **fully static
+musl** binary (`cargo build --release --target x86_64-unknown-linux-musl` with
+`RUSTFLAGS="-C target-feature=+crt-static"`, reqwest uses `rustls-tls` so no
+openssl/libc dependency remains) and published to the provider registry served
+at `registry.l.arrieta.eu/infra/llm01` as `terraform-provider-llm01_0.1.3_linux_amd64.zip`
+with SHA256 checksum and a binary detached GPG signature. The static binary
+runs in the glibc-less Coder provisioner; a plain `cargo build` (glibc dynamic)
+fails there with `no such file or directory`.
 
 **Version naming (unified):** the `v` prefix is only used in git tags and
-workflow inputs (`v0.1.1`). Registry-facing file names strip it
-(`terraform-provider-llm01_0.1.1_linux_amd64.zip`), but the binary **inside**
-the zip keeps it (`terraform-provider-llm01_v0.1.1`) — the Terraform registry
+workflow inputs (`v0.1.3`). Registry-facing file names strip it
+(`terraform-provider-llm01_0.1.3_linux_amd64.zip`), but the binary **inside**
+the zip keeps it (`terraform-provider-llm01_v0.1.3`) — the Terraform registry
 convention. The CI workflows (`build.yml` manual, `publish.yml` release)
 normalize the version by stripping the leading `v` for file names.
 
@@ -231,17 +240,15 @@ normalize the version by stripping the leading `v` for file names.
 registry image** (`registry-image/build.sh`) on release; `build.yml` (manual
 trigger) only uploads Actions artifacts. The image goes to public **GHCR**
 (`ghcr.io/javierarrieta/terraform-provider-registry`) tagged with the **bare
-release version** (`:0.1.1`). **Tags are immutable** — `build.sh` refuses to
+release version** (`:0.1.3`). **Tags are immutable** — `build.sh` refuses to
 overwrite an existing tag (and GitHub's immutable-tags package setting rejects
 it at the registry too); there is no `latest` tag. The k8s-casa
 deployment references the version tag.
 
-**How the registry is served:** the registry is an nginx + Docker registry
-(hostname in the provider source in `main.tf`). The Terraform provider protocol
-(`/.well-known/`, `/v1/providers/`, `/files/`) is served by a **static nginx**
-deployment whose `/files/` content is **baked into the image** (pushed to the
-private Docker registry) — no mounted volume, no upload endpoint (`PUT /files/`
-returns 404). Publishing means:
+**How the registry is served:** the registry is an nginx serving the Terraform
+provider protocol and static `/files/` content **baked into the image** (pushed to
+public **GHCR** `ghcr.io/javierarrieta/terraform-provider-registry:<bare-version>`)
+— no mounted volume, no upload endpoint (`PUT /files/` returns 404). Publishing means:
 
 1. Build the zip + SHA256SUMS + binary `.sig`.
 2. Bake the protocol JSON + files into a new registry-image and push it to
@@ -263,10 +270,13 @@ Registry protocol layout (modern protocol, v5.0):
 
 **Distribution steps (manual fallback only):**
 
-1. Build: `cargo build --release --bin terraform-provider-llm01`
-2. Create `terraform-provider-llm01_0.1.1_linux_amd64.zip` containing the binary
-   (renamed `terraform-provider-llm01_v0.1.1`)
-3. Create `terraform-provider-llm01_0.1.1_SHA256SUMS` with the SHA256 hash
+1. Build: `cargo build --release --target x86_64-unknown-linux-musl --bin terraform-provider-llm01`
+   with `RUSTFLAGS="-C target-feature=+crt-static"` (fully static; runnable in the
+   glibc-less provisioner). A plain `cargo build` produces a glibc binary that
+   fails there with `no such file or directory`.
+2. Create `terraform-provider-llm01_0.1.3_linux_amd64.zip` containing the binary
+   (renamed `terraform-provider-llm01_v0.1.3`)
+3. Create `terraform-provider-llm01_0.1.3_SHA256SUMS` with the SHA256 hash
 4. Decrypt GPG signing key from the sops-encrypted K8s secret in k8s-casa (age
    key in the local sops age key directory)
 5. Create **binary, detached** GPG signature (no `--armor` flag): `gpg --detach-sign`
@@ -274,8 +284,8 @@ Registry protocol layout (modern protocol, v5.0):
    image, push it to public GHCR under the bare version tag (immutable), and
    reference that tag in the k8s-casa manifest (Flux deploys)
 7. Terraform fetches the provider from the registry host in `main.tf` with
-   version `~> 0.1`
-8. Verify: `gpg --verify terraform-provider-llm01_0.1.1_SHA256SUMS.sig terraform-provider-llm01_0.1.1_SHA256SUMS` (expect "Good signature")
+   version `~> 0.1.3`
+8. Verify: `gpg --verify terraform-provider-llm01_0.1.3_SHA256SUMS.sig terraform-provider-llm01_0.1.3_SHA256SUMS` (expect "Good signature")
 
 **Critical:** Use binary GPG signature, not ASCII-armored. ASCII-armored signatures
 are rejected as "invalid data: tag byte does not have MSB set". The Terraform
