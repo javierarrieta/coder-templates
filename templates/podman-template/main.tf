@@ -11,11 +11,11 @@ terraform {
     # NOTE: Update the source address to match your private provider registry.
     llm01 = {
       source = "registry.l.arrieta.eu/infra/llm01"
-      # 0.1.1 ships a macOS Mach-O binary in the linux_amd64 zip
-      # (exec format error on provisioner init). 0.1.2 is dynamically
-      # linked glibc (no such file or directory in the glibc-less
-      # provisioner). 0.1.3+ is the static musl build, so require >= 0.1.3.
-      version = "~> 0.1.3"
+      # Exclude the broken 0.1.1 (macOS Mach-O) and 0.1.2 (dynamic glibc)
+      # builds. `~> 0.1` resolves to the highest 0.1.x, which is currently the
+      # static-musl 0.1.3-M1 (runs in the glibc-less provisioner). Prefer pinning
+      # to a stable release (`~> 0.1.3`) once v0.1.3 is cut.
+      version = "~> 0.1"
     }
   }
 }
