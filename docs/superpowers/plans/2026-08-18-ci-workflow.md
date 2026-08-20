@@ -15,7 +15,7 @@
 - Do NOT contact `registry.l.arrieta.eu` from CI; `terraform init` must resolve `llm01` (`~> 0.1`) from a local filesystem mirror at `$HOME/.tf-mirror`.
 - The provider's Cargo package version is `0.1.1`; the mirror version directory MUST be `0.1.1`.
 - `.terraform/` and `.terraform.lock.hcl` are already gitignored in `templates/podman-template/`; CI `terraform init` must not pollute git.
-- Every `run` step that touches the provider crate uses `defaults.run.working-directory: templates/podman-template/providers/llm01_workspace_target`.
+- Every `run` step that touches the provider crate uses `defaults.run.working-directory: providers/llm01_workspace_target`.
 - `upload-artifact`/`download-artifact` `path` values are repo-root relative (NOT affected by `working-directory`).
 - All commits for the code go on branch `ci/compile-tests-terraform` and are opened as a PR against `main`. Do NOT commit the code to `main`.
 
@@ -24,7 +24,7 @@
 ### Task 1: Provider unit tests + format cleanup
 
 **Files:**
-- Modify: `templates/podman-template/providers/llm01_workspace_target/src/lib.rs` (run `cargo fmt` first — the file currently has 2 import-block formatting diffs; append the `#[cfg(test)] mod tests` module at the end)
+- Modify: `providers/llm01_workspace_target/src/lib.rs` (run `cargo fmt` first — the file currently has 2 import-block formatting diffs; append the `#[cfg(test)] mod tests` module at the end)
 
 **Interfaces:**
 - Produces: 5 passing tests. All tests reference only public items already exported by the crate: `HelperClient::new`, `HelperResponse`, `WorkspaceTargetResource`, `WorkspaceTargetState`, `WorkspaceTargetPrivate`, and the `tf-provider` types `ValueString = Value<Cow<str>>`, `ValueNumber = Value<i64>`, `ValueBool = Value<bool>`, `ValueEmpty`, `AttributePath::new`, `Diagnostics`.
@@ -129,7 +129,7 @@ Expected: both exit 0.
 - [ ] **Step 5: Commit on the feature branch**
 
 ```bash
-git add templates/podman-template/providers/llm01_workspace_target/src/lib.rs
+git add providers/llm01_workspace_target/src/lib.rs
 git commit -m "test(provider): add unit tests for plan_update, HelperResponse, HelperClient"
 ```
 
@@ -141,7 +141,7 @@ git commit -m "test(provider): add unit tests for plan_update, HelperResponse, H
 - Create: `.github/workflows/ci.yml`
 
 **Interfaces:**
-- Consumes: artifact `llm01-provider-linux-amd64` (the release binary) uploaded by the `provider` job from `templates/podman-template/providers/llm01_workspace_target/target/release/terraform-provider-llm01`.
+- Consumes: artifact `llm01-provider-linux-amd64` (the release binary) uploaded by the `provider` job from `providers/llm01_workspace_target/target/release/terraform-provider-llm01`.
 - Produces: `prefer` CI signal on `main` pushes and pull requests touching `.github/workflows/**` or `templates/podman-template/**`.
 
 - [ ] **Step 1: Create `.github/workflows/ci.yml`**
@@ -165,7 +165,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: templates/podman-template/providers/llm01_workspace_target
+        working-directory: providers/llm01_workspace_target
     steps:
       - uses: actions/checkout@v4
 
@@ -190,7 +190,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: llm01-provider-linux-amd64
-          path: templates/podman-template/providers/llm01_workspace_target/target/release/terraform-provider-llm01
+          path: providers/llm01_workspace_target/target/release/terraform-provider-llm01
 
   terraform:
     runs-on: ubuntu-latest

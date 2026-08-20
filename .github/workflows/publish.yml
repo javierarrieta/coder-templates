@@ -12,7 +12,7 @@ jobs:
       packages: write
     defaults:
       run:
-        working-directory: templates/podman-template/providers/llm01_workspace_target
+        working-directory: providers/llm01_workspace_target
 
     steps:
       - name: Checkout
@@ -89,7 +89,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: terraform-provider-${{ github.event.release.tag_name }}-linux-amd64
-          path: templates/podman-template/providers/llm01_workspace_target/release/terraform-provider-llm01_${{ steps.ver.outputs.bare }}_linux_amd64.zip
+          path: providers/llm01_workspace_target/release/terraform-provider-llm01_${{ steps.ver.outputs.bare }}_linux_amd64.zip
 
       - name: Create checksums
         run: |
@@ -101,7 +101,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: terraform-provider-${{ github.event.release.tag_name }}-checksums
-          path: templates/podman-template/providers/llm01_workspace_target/release/terraform-provider-llm01_${{ steps.ver.outputs.bare }}_SHA256SUMS
+          path: providers/llm01_workspace_target/release/terraform-provider-llm01_${{ steps.ver.outputs.bare }}_SHA256SUMS
 
       - name: Sign SHA256SUMS (binary GPG)
         env:

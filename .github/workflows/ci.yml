@@ -6,17 +6,19 @@ on:
     paths:
       - ".github/workflows/**"
       - "templates/podman-template/**"
+      - "providers/**"
   pull_request:
     paths:
       - ".github/workflows/**"
       - "templates/podman-template/**"
+      - "providers/**"
 
 jobs:
   provider:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: templates/podman-template/providers/llm01_workspace_target
+        working-directory: providers/llm01_workspace_target
     steps:
       - uses: actions/checkout@v4
 
@@ -76,7 +78,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: llm01-provider-linux-amd64
-          path: templates/podman-template/providers/llm01_workspace_target/target/x86_64-unknown-linux-musl/release/terraform-provider-llm01
+          path: providers/llm01_workspace_target/target/x86_64-unknown-linux-musl/release/terraform-provider-llm01
 
   terraform:
     runs-on: ubuntu-latest

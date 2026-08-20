@@ -24,8 +24,8 @@
 ### Task 1: Registry image scaffolding (`registry-image/`)
 
 **Files:**
-- Create: `templates/podman-template/providers/llm01_workspace_target/registry-image/Dockerfile`
-- Create: `templates/podman-template/providers/llm01_workspace_target/registry-image/nginx.conf`
+- Create: `providers/llm01_workspace_target/registry-image/Dockerfile`
+- Create: `providers/llm01_workspace_target/registry-image/nginx.conf`
 
 **Interfaces:**
 - Consumes: nothing (first task).
@@ -64,7 +64,7 @@ server {
 - [ ] **Step 3: Commit**
 
 ```bash
-git add templates/podman-template/providers/llm01_workspace_target/registry-image/Dockerfile templates/podman-template/providers/llm01_workspace_target/registry-image/nginx.conf
+git add providers/llm01_workspace_target/registry-image/Dockerfile providers/llm01_workspace_target/registry-image/nginx.conf
 git commit -m "feat(registry-image): add Dockerfile and nginx config for provider registry image"
 ```
 
@@ -73,7 +73,7 @@ git commit -m "feat(registry-image): add Dockerfile and nginx config for provide
 ### Task 2: Registry image `build.sh`
 
 **Files:**
-- Create: `templates/podman-template/providers/llm01_workspace_target/registry-image/build.sh`
+- Create: `providers/llm01_workspace_target/registry-image/build.sh`
 
 **Interfaces:**
 - Consumes: Task 1's `Dockerfile` + `nginx.conf`. The workflow passes a staged zip at `release/terraform-provider-llm01_<bare>_linux_amd64.zip`, `release/terraform-provider-llm01_<bare>_SHA256SUMS`, and a binary `.sig` (created by Task 3) at `release/terraform-provider-llm01_<bare>_SHA256SUMS.sig`.
@@ -217,13 +217,13 @@ echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
 - [ ] **Step 2: Make it executable and shellcheck-validate**
 
-Run: `chmod +x templates/podman-template/providers/llm01_workspace_target/registry-image/build.sh && bash -n templates/podman-template/providers/llm01_workspace_target/registry-image/build.sh`
+Run: `chmod +x providers/llm01_workspace_target/registry-image/build.sh && bash -n providers/llm01_workspace_target/registry-image/build.sh`
 Expected: exit 0, no syntax errors.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add templates/podman-template/providers/llm01_workspace_target/registry-image/build.sh
+git add providers/llm01_workspace_target/registry-image/build.sh
 git commit -m "feat(registry-image): add build.sh to assemble, build, and push registry image"
 ```
 
@@ -267,7 +267,7 @@ Append after the existing "Upload checksums" step (before end of the `publish` j
           GITHUB_OUTPUT: $GITHUB_OUTPUT
 ```
 
-Note: `build.sh` needs to be invoked from the working directory. The job already sets `defaults.run.working-directory` to `templates/podman-template/providers/llm01_workspace_target`, so `registry-image/build.sh` resolves correctly. The `release/` dir referenced by `build.sh` is resolved by `build.sh` itself as `<crate-root>/release/` (its `$here` is `<crate-root>/registry-image`, so `../release` → the crate root `release/`), matching where the existing zip/checksum steps write. Add `packages: write` to the job's `permissions` block (GHCR push).
+Note: `build.sh` needs to be invoked from the working directory. The job already sets `defaults.run.working-directory` to `providers/llm01_workspace_target`, so `registry-image/build.sh` resolves correctly. The `release/` dir referenced by `build.sh` is resolved by `build.sh` itself as `<crate-root>/release/` (its `$here` is `<crate-root>/registry-image`, so `../release` → the crate root `release/`), matching where the existing zip/checksum steps write. Add `packages: write` to the job's `permissions` block (GHCR push).
 
 - [ ] **Step 2: Docker login before push**
 
@@ -340,7 +340,7 @@ Expected: `401` (Docker registry requires auth).
 ### Task 5: Documentation update
 
 **Files:**
-- Modify: `templates/podman-template/providers/llm01_workspace_target/README.md` (replace the "publishing today" manual steps with the CI-publish flow).
+- Modify: `providers/llm01_workspace_target/README.md` (replace the "publishing today" manual steps with the CI-publish flow).
 - Modify: `AGENTS.md` (distribution section: CI now publishes; manual bump remains).
 
 **Interfaces:**
@@ -396,7 +396,7 @@ produces).
 - [ ] **Step 3: Commit**
 
 ```bash
-git add templates/podman-template/providers/llm01_workspace_target/README.md AGENTS.md
+git add providers/llm01_workspace_target/README.md AGENTS.md
 git commit -m "docs: document CI-publish flow for provider registry"
 ```
 

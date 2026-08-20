@@ -55,7 +55,7 @@ a dynamically-linked glibc binary that fails with `no such file or directory`
 in the provisioner.
 
 ```bash
-cd templates/podman-template/providers/llm01_workspace_target
+cd providers/llm01_workspace_target
 cargo build --release --bin terraform-provider-llm01
 ```
 
