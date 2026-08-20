@@ -520,11 +520,23 @@ impl Resource for WorkspaceTargetResource {
             None => return None,
         };
         let workspace = _prior_state.workspace.as_str().to_string();
-        let capability = planned_private_state.capability.as_str().to_string();
-        if capability.is_empty() {
+        let existing_cap = planned_private_state.capability.as_str().to_string();
+        if existing_cap.is_empty() {
             diags.root_error_short("no capability in private state; cannot destroy target");
             return None;
         }
+        // The capability may have been invalidated by a prior stop (active=false
+        // runs acquire+detach+release, which releases the lease server-side but
+        // keeps the old capability in private state). acquire() is idempotent —
+        // it returns a fresh capability when the stored one is no longer valid —
+        // so re-acquire before destroying instead of failing hard on a 403.
+        let capability = match client.acquire(&workspace, Some(&existing_cap)).await {
+            Ok(cap) => cap,
+            Err(err) => {
+                diags.root_error_short(format!("reacquire failed: {}", err));
+                return None;
+            }
+        };
         if let Err(err) = client.destroy(&workspace, &capability).await {
             diags.root_error_short(format!("destroy failed: {}", err));
             return None;

@@ -65,9 +65,11 @@ The binary is published to the provider registry served at
 `registry.home.arrieta.eu/infra/llm01` (an nginx fronting the GHCR-hosted
 registry image):
 - Package: `terraform-provider-llm01`
-- Version: `0.1.3` (the template requires `~> 0.1.3`; 0.1.1 ships a macOS
-  Mach-O binary in the `linux_amd64` zip, and 0.1.2 is dynamic glibc — both
-  fail in the provisioner, so 0.1.3 is the minimum).
+- Version: `0.1.4` (the template requires `~> 0.1.3`; 0.1.1 ships a macOS
+  Mach-O binary in the `linux_amd64` zip, 0.1.2 is dynamic glibc — both
+  fail in the provisioner, so 0.1.3+ is the static musl minimum. 0.1.4 fixes
+  workspace deletion of a stopped workspace by re-acquiring the lease before
+  destroying the iSCSI target).
 
 ### How the registry is served (publishing today)
 
