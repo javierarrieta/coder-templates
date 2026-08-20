@@ -175,11 +175,15 @@ podman exec coder-<workspace> ls -l /lib64/ld-linux-x86-64.so.2 /lib64/libstdc++
   volumes to the container user on first use, which fails with
   `lchown <volume>/_data: operation not permitted` on network-backed mounts;
   bind mounts are never chowned.
-- The container runs as uid 1000 with `userns_mode = "keep-id"`, mapping the
-  container's `coder` (uid 1000) to the Podman host user (uid 1000) so the
-  existing home data stays owned/writable by the workspace user. If a workspace's
-  agent can't write `/home/coder`, the freshly-mounted iSCSI target is owned by
-  root on the host — the helper must `chown` the attached mount to uid 1000.
+- The container runs as uid 1000 (`coder`) with
+  `userns_mode = "keep-id:uid=1000,gid=1000"`. Plain `keep-id` would map the
+  Podman host user (uid **27003** on the podman host, not 1000) to container
+  uid 27003, while the process runs as uid 1000 — the process then falls into
+  the subuid range (host 101000) and can't access home data. The `uid=`/`gid=`
+  suffix forces the host user → container uid 1000, so `/home/coder` data owned
+  by host uid 27003 is writable by `coder`. If a workspace's agent can't write
+  `/home/coder`, the freshly-mounted iSCSI target is owned by root on the host —
+  the helper must `chown` the attached mount to host uid **27003**.
 - Auth/certs are mounted from Coder secrets: `/run/secrets/coder-podman-client`
   (mTLS). The image is pulled from public GHCR — no registry pull credentials
   needed (the `coder-registry-pull` secret is no longer referenced).
