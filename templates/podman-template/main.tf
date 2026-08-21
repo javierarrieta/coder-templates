@@ -127,16 +127,17 @@ resource "docker_container" "chown_home" {
   name  = "coder-${data.coder_workspace.me.name}-chown"
   image = docker_image.workspace.image_id
 
-  volumes {
-    container_path = "/home/coder"
-    volume_name    = docker_volume.home[0].name
+  mounts {
+    target = "/home/coder"
+    source = "/srv/coder/workspaces/coder-${data.coder_workspace.me.name}"
+    type   = "bind"
   }
 
   command = ["sh", "-c", "chown -R 1000:1000 /home/coder"]
   rm      = true
   user    = "0:0"
 
-  depends_on = [docker_volume.home]
+  depends_on = [llm01_workspace_target.workspace]
 }
 
 resource "docker_container" "workspace" {
