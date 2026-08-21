@@ -10,7 +10,7 @@ resource over the workspace-target helper API.
 ```
 coder-templates/
   templates/podman-template/
-    main.tf                 # the template (agent, volumes, container, params)
+    main.tf                 # the template (agent, home bind mount, container, params)
     compatibility/main.tf   # standalone mTLS-podman-API + image-pull compatibility test (run in a provisioner pod)
     scripts/truenas-iscsi-helper-client.sh  # mTLS lifecycle script (provision/attach/detach/destroy)
     providers/llm01_workspace_target/       # Rust Terraform provider
@@ -168,14 +168,30 @@ podman exec coder-<workspace> ls -l /lib64/ld-linux-x86-64.so.2 /lib64/libstdc++
 
 - `memory_gb` (2–8, mutable), `cpu_count` (2–24, mutable), `workspace_image` (mutable).
 - `disk_gb` (10–200) is **immutable after workspace creation** (`mutable = false`).
-- The container's only volume is `/home/coder` (iSCSI-backed via the `llm01`
+- The container's only mount is `/home/coder` (iSCSI-backed via the `llm01`
   provider + helper). Data outside `/home/coder` is ephemeral to the pod.
+- `/home/coder` is a **direct bind mount** (`mounts { type = "bind" }`) of the
+  helper's iSCSI target — not a named volume. Rootless Podman chowns named
+  volumes to the container user on first use, which fails with
+  `lchown <volume>/_data: operation not permitted` on network-backed mounts;
+  bind mounts are never chowned.
+- The container runs as uid 1000 (`coder`) with
+  `userns_mode = "keep-id:uid=1000,gid=1000"`. Plain `keep-id` would map the
+  Podman host user (uid **27003** on the podman host, not 1000) to container
+  uid 27003, while the process runs as uid 1000 — the process then falls into
+  the subuid range (host 101000) and can't access home data. The `uid=`/`gid=`
+  suffix forces the host user → container uid 1000, so `/home/coder` data owned
+  by host uid 27003 is writable by `coder`. If a workspace's agent can't write
+  `/home/coder`, the freshly-mounted iSCSI target is owned by root on the host —
+  the helper must `chown` the attached mount to host uid **27003**.
 - Auth/certs are mounted from Coder secrets: `/run/secrets/coder-podman-client`
   (mTLS). The image is pulled from public GHCR — no registry pull credentials
   needed (the `coder-registry-pull` secret is no longer referenced).
 - The single-workspace lease + iSCSI target is acquired through the `llm01`
-  private provider (`registry.l.arrieta.eu/infra/llm01`). Update the source
-  address in `main.tf` to match your private registry.
+  provider (`registry.home.arrieta.eu/infra/llm01` — the host that serves the
+  provider's download_url). The source address in `main.tf` must match this;
+  a mismatch with the host recorded in the workspace state makes Terraform
+  treat them as different providers and fails init.
 
 ## The Rust provider (`llm01_workspace_target`)
 
@@ -190,7 +206,8 @@ podman exec coder-<workspace> ls -l /lib64/ld-linux-x86-64.so.2 /lib64/libstdc++
   `X-Coder-Capability` header and never logged.
 - No Terraform/test harness is in this repo. `compatibility/main.tf` is a
   standalone check run from a provisioner pod (mTLS podman API + public image
-  pull + bind-volume + cgroup v2 limits + non-root uid 1000). On success it
+  pull + bind-mount home + keep-id + cgroup v2 limits + non-root uid 1000). On
+  success it
   requires filling in
   `docs/superpowers/evidence/2026-08-08-coder-podman-compatibility.md` and
   committing it.
@@ -199,8 +216,88 @@ podman exec coder-<workspace> ls -l /lib64/ld-linux-x86-64.so.2 /lib64/libstdc++
 
 - `terraform` and the `coder` CLI are NOT in this repo's environment; install
   `coder` (to push) and Terraform locally if you need to run plans.
-- `cargo` (1.92, Nix profile) builds the provider: `cargo build` in
-  `templates/podman-template/providers/llm01_workspace_target/`.
+- `cargo` (1.96 here; CI uses `dtolnay/rust-toolchain@stable`) builds the
+  provider as a **static musl** binary: `cargo build --release
+  --target x86_64-unknown-linux-musl` with `RUSTFLAGS="-C target-feature=+crt-static"`
+  in `providers/llm01_workspace_target/`. CI's
+  `Install protoc and musl` step pins `protoc 25.1` via `curl` and installs the
+  small `musl-tools` package (with apt retries + `--no-install-recommends`) to
+  avoid the `apt-get install protobuf-compiler` hang seen on the GitHub runners.
+
+### terraform-provider-llm01 v0.1.3 binary distribution (see README.md for full docs)
+
+The `llm01_workspace_target` Rust provider is built by CI as a **fully static
+musl** binary (`cargo build --release --target x86_64-unknown-linux-musl` with
+`RUSTFLAGS="-C target-feature=+crt-static"`, reqwest uses `rustls-tls` so no
+openssl/libc dependency remains) and published to the provider registry served at
+`registry.home.arrieta.eu/infra/llm01` as `terraform-provider-llm01_0.1.3_linux_amd64.zip`
+with SHA256 checksum and a binary detached GPG signature. The static binary
+runs in the glibc-less Coder provisioner; a plain `cargo build` (glibc dynamic)
+fails there with `no such file or directory`.
+
+**Version naming (unified):** the `v` prefix is only used in git tags and
+workflow inputs (`v0.1.3`). Registry-facing file names strip it
+(`terraform-provider-llm01_0.1.3_linux_amd64.zip`), but the binary **inside**
+the zip keeps it (`terraform-provider-llm01_v0.1.3`) — the Terraform registry
+convention. The CI workflows (`build.yml` manual, `publish.yml` release)
+normalize the version by stripping the leading `v` for file names.
+
+**CI reality:** `publish.yml` builds, signs, packages, **and pushes a new
+registry image** (`registry-image/build.sh`) on release; `build.yml` (manual
+trigger) only uploads Actions artifacts. The image goes to public **GHCR**
+(`ghcr.io/javierarrieta/terraform-provider-registry`) tagged with the **bare
+release version** (`:0.1.3`). **Tags are immutable** — `build.sh` refuses to
+overwrite an existing tag (and GitHub's immutable-tags package setting rejects
+it at the registry too); there is no `latest` tag. The k8s-casa
+deployment references the version tag.
+
+**How the registry is served:** the registry is an nginx serving the Terraform
+provider protocol and static `/files/` content **baked into the image** (pushed to
+public **GHCR** `ghcr.io/javierarrieta/terraform-provider-registry:<bare-version>`)
+— no mounted volume, no upload endpoint (`PUT /files/` returns 404). Publishing means:
+
+1. Build the zip + SHA256SUMS + binary `.sig`.
+2. Bake the protocol JSON + files into a new registry-image and push it to
+   public **GHCR** (`ghcr.io/javierarrieta/terraform-provider-registry`).
+3. Reference the new image by its immutable version tag in the **k8s-casa**
+   deployment manifest (image → `ghcr.io/javierarrieta/terraform-provider-registry:<bare-version>`) and push — Flux GitOps deploys it. GHCR images are
+   publicly pullable, so no k8s-casa pull-credential change is needed.
+   k8s-casa/AGENTS.md forbids imperative kubectl changes. (Concrete
+   hostnames/namespaces/secret names live in k8s-casa only.)
+
+Registry protocol layout (modern protocol, v5.0):
+
+- `/.well-known/terraform.json` → `{"providers.v1":"/v1/providers/"}`
+- `/v1/providers/infra/llm01/versions`
+- `/v1/providers/infra/llm01/{version}/download/{os}/{arch}`
+- `/files/terraform-provider-llm01_{version}_{os}_{arch}.zip`
+- `/files/terraform-provider-llm01_{version}_SHA256SUMS`
+- `/files/terraform-provider-llm01_{version}_SHA256SUMS.sig`
+
+**Distribution steps (manual fallback only):**
+
+1. Build: `cargo build --release --target x86_64-unknown-linux-musl --bin terraform-provider-llm01`
+   with `RUSTFLAGS="-C target-feature=+crt-static"` (fully static; runnable in the
+   glibc-less provisioner). A plain `cargo build` produces a glibc binary that
+   fails there with `no such file or directory`.
+2. Create `terraform-provider-llm01_0.1.3_linux_amd64.zip` containing the binary
+   (renamed `terraform-provider-llm01_v0.1.3`)
+3. Create `terraform-provider-llm01_0.1.3_SHA256SUMS` with the SHA256 hash
+4. Decrypt GPG signing key from the sops-encrypted K8s secret in k8s-casa (age
+   key in the local sops age key directory)
+5. Create **binary, detached** GPG signature (no `--armor` flag): `gpg --detach-sign`
+6. Bake the protocol JSON + files into a new `terraform-provider-registry`
+   image, push it to public GHCR under the bare version tag (immutable), and
+   reference that tag in the k8s-casa manifest (Flux deploys)
+7. Terraform fetches the provider from the registry host in `main.tf` with
+   version `~> 0.1.3`
+8. Verify: `gpg --verify terraform-provider-llm01_0.1.3_SHA256SUMS.sig terraform-provider-llm01_0.1.3_SHA256SUMS` (expect "Good signature")
+
+**Critical:** Use binary GPG signature, not ASCII-armored. ASCII-armored signatures
+are rejected as "invalid data: tag byte does not have MSB set". The Terraform
+provider client expects binary signatures. The GPG key is stored in k8s-casa's
+K8s secrets via `sops-encrypted`, not in this repo (fingerprint public in the
+registry's download JSON).
 
 ## Remote VS Code debugging notes (llm01)
 

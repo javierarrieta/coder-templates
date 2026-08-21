@@ -1,0 +1,137 @@
+name: Build and Publish Provider
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    defaults:
+      run:
+        working-directory: providers/llm01_workspace_target
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          target: x86_64-unknown-linux-musl
+
+      - name: Install protoc (pinned release) and musl
+        run: |
+          set -euo pipefail
+          # Avoid the flaky/slow 'apt-get install protobuf-compiler': fetch a
+          # pinned protoc release and unpack with python3 (present on the runner)
+          # so the only apt dependency is the small musl toolchain.
+          protoc_version=25.1
+          arch=$(uname -m); case "$arch" in aarch64*) arch=aarch_64;; esac
+          url="https://github.com/protocolbuffers/protobuf/releases/download/v${protoc_version}/protoc-${protoc_version}-linux-${arch}.zip"
+          curl -fsSL --retry 3 "$url" -o /tmp/protoc.zip
+          python3 - <<'PY'
+          import os, shutil, zipfile
+          tmp = "/tmp/protoc-extract"
+          shutil.rmtree(tmp, ignore_errors=True)
+          os.makedirs(tmp, exist_ok=True)
+          zipfile.ZipFile("/tmp/protoc.zip").extractall(tmp)
+          PY
+          sudo mkdir -p /usr/local/bin /usr/local/include
+          sudo cp -a /tmp/protoc-extract/bin/protoc /usr/local/bin/protoc
+          sudo cp -a /tmp/protoc-extract/include/google /usr/local/include/google
+          sudo chmod +x /usr/local/bin/protoc
+          rm -rf /tmp/protoc-extract /tmp/protoc.zip
+          protoc --version
+          sudo apt-get update \
+            -o Acquire::Retries=5 \
+            -o Acquire::http::Timeout=20 \
+            -o Acquire::https::Timeout=20 \
+            -o Acquire::Languages=none
+          sudo apt-get install -y --no-install-recommends musl-tools
+          musl-gcc --version | head -1
+
+      - name: Build provider (static musl)
+        run: |
+          RUSTFLAGS="-C target-feature=+crt-static" \
+          cargo build --release --target x86_64-unknown-linux-musl \
+            --bin terraform-provider-llm01
+
+      - name: Verify static binary
+        run: |
+          bin=target/x86_64-unknown-linux-musl/release/terraform-provider-llm01
+          ldd "$bin" 2>&1 || true
+          test -x "$bin"
+
+      - name: Normalize version (strip leading v for registry file names)
+        id: ver
+        env:
+          VERSION: ${{ github.event.release.tag_name }}
+        run: echo "bare=${VERSION#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build binary release
+        run: |
+          mkdir -p release
+          cp target/x86_64-unknown-linux-musl/release/terraform-provider-llm01 release/terraform-provider-llm01_v${{ steps.ver.outputs.bare }}
+          ls -la release/
+
+      - name: Create zip (excluding target/)
+        run: |
+          cd release
+          zip -q terraform-provider-llm01_${{ steps.ver.outputs.bare }}_linux_amd64.zip terraform-provider-llm01_v${{ steps.ver.outputs.bare }}
+          ls -la
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-provider-${{ github.event.release.tag_name }}-linux-amd64
+          path: providers/llm01_workspace_target/release/terraform-provider-llm01_${{ steps.ver.outputs.bare }}_linux_amd64.zip
+
+      - name: Create checksums
+        run: |
+          cd release
+          sha256sum terraform-provider-llm01_${{ steps.ver.outputs.bare }}_linux_amd64.zip > terraform-provider-llm01_${{ steps.ver.outputs.bare }}_SHA256SUMS
+          ls -la
+
+      - name: Upload checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-provider-${{ github.event.release.tag_name }}-checksums
+          path: providers/llm01_workspace_target/release/terraform-provider-llm01_${{ steps.ver.outputs.bare }}_SHA256SUMS
+
+      - name: Sign SHA256SUMS (binary GPG)
+        env:
+          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+        run: |
+          if [[ -z "$GPG_SIGNING_KEY" ]]; then
+            echo "::error::GPG_SIGNING_KEY secret not configured; skipping publish"
+            exit 1
+          fi
+          echo "$GPG_SIGNING_KEY" | gpg --batch --import
+          cd release
+          gpg --batch --yes --pinentry-mode loopback --detach-sign \
+            --output terraform-provider-llm01_${{ steps.ver.outputs.bare }}_SHA256SUMS.sig \
+            terraform-provider-llm01_${{ steps.ver.outputs.bare }}_SHA256SUMS
+          ls -la
+
+      - name: Login to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push registry image
+        id: registry
+        run: |
+          bash registry-image/build.sh "${{ steps.ver.outputs.bare }}" "$PROTOCOL_HOST"
+        env:
+          PROTOCOL_HOST: ${{ secrets.PROTOCOL_HOST }}
+          GITHUB_OUTPUT: $GITHUB_OUTPUT
+
+      - name: Show published image tag
+        run: |
+          echo "Published image: ghcr.io/javierarrieta/terraform-provider-registry:${{ steps.ver.outputs.bare }}"
+          echo "Digest: ${{ steps.registry.outputs.digest }}"
+          echo "Reference the immutable tag in the k8s-casa terraform-provider-registry deployment manifest, commit, and let Flux deploy."

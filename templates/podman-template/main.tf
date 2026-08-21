@@ -8,10 +8,15 @@ terraform {
       source  = "kreuzwerker/docker"
       version = "~> 3.6"
     }
-    # NOTE: Update the source address to match your private provider registry.
+    # NOTE: The provider source host must match the registry that the workspace
+    # state was created under (the host in the registry's download_url).
     llm01 = {
-      source  = "registry.home.arrieta.eu/infra/llm01"
-      version = "~> 0.1"
+      source = "registry.home.arrieta.eu/infra/llm01"
+      # 0.1.1 ships a macOS Mach-O binary in the linux_amd64 zip
+      # (exec format error on provisioner init). 0.1.2 is dynamically
+      # linked glibc (no such file or directory in the glibc-less
+      # provisioner). 0.1.3+ is the static musl build, so require >= 0.1.3.
+      version = "~> 0.1.3"
     }
   }
 }
@@ -101,19 +106,6 @@ resource "llm01_workspace_target" "workspace" {
   active    = data.coder_workspace.me.start_count > 0
 }
 
-resource "docker_volume" "home" {
-  count = data.coder_workspace.me.start_count
-  name  = "coder-${data.coder_workspace.me.name}-home"
-
-  driver = "local"
-  driver_opts = {
-    type   = "none"
-    o      = "bind"
-    device = "/srv/coder/workspaces/coder-${data.coder_workspace.me.name}"
-  }
-  depends_on = [llm01_workspace_target.workspace]
-}
-
 data "coder_parameter" "workspace_image" {
   name         = "workspace_image"
   display_name = "Workspace image"
@@ -152,10 +144,25 @@ resource "docker_container" "workspace" {
   memory = data.coder_parameter.memory_gb.value * 1024
   cpus   = tostring(data.coder_parameter.cpu_count.value)
 
-  volumes {
-    container_path = "/home/coder"
-    volume_name    = docker_volume.home[0].name
+  # Bind-mount the iSCSI-backed home directory directly instead of a named
+  # volume. Rootless Podman chowns named volumes to the container user on first
+  # use, which fails with EPERM on the iSCSI mount; bind mounts are never
+  # chowned.
+  #
+  # keep-id maps the podman host user to the given container uid:gid. Plain
+  # "keep-id" maps host user -> container uid == host uid (here 27003), which
+  # does NOT match the process user (1000:1000); the process then falls into
+  # the subuid range (host 101000) and cannot access home data owned by the
+  # host user. "keep-id:uid=1000,gid=1000" forces host user -> container
+  # uid 1000 so the workspace user and its /home/coder data share one owner.
+  mounts {
+    target = "/home/coder"
+    source = "/srv/coder/workspaces/coder-${data.coder_workspace.me.name}"
+    type   = "bind"
   }
+
+  user        = "1000:1000"
+  userns_mode = "keep-id:uid=1000,gid=1000"
 
   env = [
     "CODER_AGENT_TOKEN=${coder_agent.main.token}",

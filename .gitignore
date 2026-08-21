@@ -1,0 +1,8 @@
+# Rust build artifacts (llm01_workspace_target provider)
+target/
+
+# git worktrees
+.worktrees/
+
+# local SDD/planning artifacts (contain internal hostnames/secret names — never commit)
+.superpowers/

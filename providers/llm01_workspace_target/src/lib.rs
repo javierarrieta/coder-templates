@@ -9,10 +9,13 @@ use async_trait::async_trait;
 use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
 
-use tf_provider::schema::{Attribute, AttributeConstraint, AttributeType, Block, Description, Schema};
+use tf_provider::schema::{
+    Attribute, AttributeConstraint, AttributeType, Block, Description, Schema,
+};
 use tf_provider::value::{ValueBool, ValueEmpty, ValueNumber, ValueString};
-use tf_provider::{map, AttributePath, Diagnostics, DynamicDataSource, DynamicResource, Provider, Resource};
-
+use tf_provider::{
+    map, AttributePath, Diagnostics, DynamicDataSource, DynamicResource, Provider, Resource,
+};
 
 /// Provider configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -54,7 +57,7 @@ pub struct HelperResponse {
 }
 
 /// mTLS HTTP client for the workspace target helper API.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct HelperClient {
     endpoint: String,
     http: HttpClient,
@@ -119,9 +122,15 @@ impl HelperClient {
         existing_capability: Option<&str>,
     ) -> Result<String> {
         let resp = self
-            .call("POST", &format!("lease/{}/acquire", workspace), None, existing_capability)
+            .call(
+                "POST",
+                &format!("lease/{}/acquire", workspace),
+                None,
+                existing_capability,
+            )
             .await?;
-        resp.capability.ok_or_else(|| anyhow!("helper returned no capability"))
+        resp.capability
+            .ok_or_else(|| anyhow!("helper returned no capability"))
     }
 
     pub async fn provision(&self, workspace: &str, capability: &str, size_gb: i64) -> Result<()> {
@@ -240,7 +249,10 @@ impl Provider for Llm01Provider {
         let endpoint = config.endpoint.as_str();
         let cert_path = config.cert_path.as_str();
         if endpoint.is_empty() || cert_path.is_empty() {
-            _diags.root_error("missing provider config", "endpoint and cert_path are required");
+            _diags.root_error(
+                "missing provider config",
+                "endpoint and cert_path are required",
+            );
             return None;
         }
         match HelperClient::new(endpoint, cert_path) {
@@ -330,11 +342,7 @@ impl Resource for WorkspaceTargetResource {
         })
     }
 
-    async fn validate<'a>(
-        &self,
-        _diags: &mut Diagnostics,
-        _config: Self::State<'a>,
-    ) -> Option<()> {
+    async fn validate<'a>(&self, _diags: &mut Diagnostics, _config: Self::State<'a>) -> Option<()> {
         Some(())
     }
 
@@ -366,11 +374,7 @@ impl Resource for WorkspaceTargetResource {
         _config_state: Self::State<'a>,
         prior_private_state: Self::PrivateState<'a>,
         _provider_meta_state: Self::ProviderMetaState<'a>,
-    ) -> Option<(
-        Self::State<'a>,
-        Self::PrivateState<'a>,
-        Vec<AttributePath>,
-    )> {
+    ) -> Option<(Self::State<'a>, Self::PrivateState<'a>, Vec<AttributePath>)> {
         // workspace and size_gb are immutable; a change forces replacement.
         let mut replace = Vec::new();
         if proposed_state.workspace != prior_state.workspace {
@@ -478,13 +482,25 @@ impl Resource for WorkspaceTargetResource {
                 },
             ))
         } else {
-            // Stopping: detach and release the lease. Keep the capability in
+            // Stopping: detach and release the lease. The stored capability
+            // may have been released or expired server-side (a prior stop, an
+            // expired lease, or a helper restart), in which case the helper
+            // rejects it with 403. acquire() is idempotent — it returns a fresh
+            // capability when the stored one is no longer valid — so re-acquire
+            // before detaching instead of failing hard. Keep the capability in
             // state so a later start can reacquire idempotently.
-            if let Err(err) = client.detach(&workspace, &existing_cap).await {
+            let capability = match client.acquire(&workspace, Some(&existing_cap)).await {
+                Ok(cap) => cap,
+                Err(err) => {
+                    diags.root_error_short(format!("reacquire failed: {}", err));
+                    return None;
+                }
+            };
+            if let Err(err) = client.detach(&workspace, &capability).await {
                 diags.root_error_short(format!("detach failed: {}", err));
                 return None;
             }
-            if let Err(err) = client.release(&workspace, &existing_cap).await {
+            if let Err(err) = client.release(&workspace, &capability).await {
                 diags.root_error_short(format!("release failed: {}", err));
                 return None;
             }
@@ -504,15 +520,94 @@ impl Resource for WorkspaceTargetResource {
             None => return None,
         };
         let workspace = _prior_state.workspace.as_str().to_string();
-        let capability = planned_private_state.capability.as_str().to_string();
-        if capability.is_empty() {
+        let existing_cap = planned_private_state.capability.as_str().to_string();
+        if existing_cap.is_empty() {
             diags.root_error_short("no capability in private state; cannot destroy target");
             return None;
         }
+        // The capability may have been invalidated by a prior stop (active=false
+        // runs acquire+detach+release, which releases the lease server-side but
+        // keeps the old capability in private state). acquire() is idempotent —
+        // it returns a fresh capability when the stored one is no longer valid —
+        // so re-acquire before destroying instead of failing hard on a 403.
+        let capability = match client.acquire(&workspace, Some(&existing_cap)).await {
+            Ok(cap) => cap,
+            Err(err) => {
+                diags.root_error_short(format!("reacquire failed: {}", err));
+                return None;
+            }
+        };
         if let Err(err) = client.destroy(&workspace, &capability).await {
             diags.root_error_short(format!("destroy failed: {}", err));
             return None;
         }
         Some(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::borrow::Cow;
+
+    fn state(workspace: &str, size_gb: i64, active: bool) -> WorkspaceTargetState<'static> {
+        WorkspaceTargetState {
+            workspace: ValueString::Value(Cow::Owned(workspace.to_string())),
+            size_gb: ValueNumber::Value(size_gb),
+            active: ValueBool::Value(active),
+        }
+    }
+
+    async fn plan_replace_paths(
+        prior: WorkspaceTargetState<'static>,
+        proposed: WorkspaceTargetState<'static>,
+    ) -> Vec<AttributePath> {
+        tf_provider::Resource::plan_update(
+            &WorkspaceTargetResource::default(),
+            &mut Diagnostics::default(),
+            prior,
+            proposed,
+            WorkspaceTargetState::default(),
+            WorkspaceTargetPrivate::default(),
+            ValueEmpty::default(),
+        )
+        .await
+        .expect("plan_update should produce a plan")
+        .2
+    }
+
+    #[tokio::test]
+    async fn plan_update_forces_replacement_on_workspace_change() {
+        let replace = plan_replace_paths(state("ws-a", 50, true), state("ws-b", 50, true)).await;
+        assert_eq!(replace, vec![AttributePath::new("workspace")]);
+    }
+
+    #[tokio::test]
+    async fn plan_update_forces_replacement_on_size_change() {
+        let replace = plan_replace_paths(state("ws-a", 50, true), state("ws-a", 80, true)).await;
+        assert_eq!(replace, vec![AttributePath::new("size_gb")]);
+    }
+
+    #[tokio::test]
+    async fn plan_update_does_not_replace_on_active_only_change() {
+        let replace = plan_replace_paths(state("ws-a", 50, true), state("ws-a", 50, false)).await;
+        assert!(replace.is_empty());
+    }
+
+    #[test]
+    fn helper_response_deserializes_with_defaults() {
+        let parsed: HelperResponse =
+            serde_json::from_str(r#"{"ok":true,"capability":"cap-123"}"#).unwrap();
+        assert!(parsed.ok);
+        assert_eq!(parsed.capability.as_deref(), Some("cap-123"));
+        assert_eq!(parsed.error, None);
+        assert_eq!(parsed.device, None);
+        assert_eq!(parsed.mountpoint, None);
+    }
+
+    #[test]
+    fn helper_client_new_errors_on_missing_cert_files() {
+        let err = HelperClient::new("https://localhost:2377", "/nonexistent/certs").unwrap_err();
+        assert!(err.to_string().contains("No such file"));
     }
 }

@@ -17,8 +17,19 @@ The built-in Coder provisioner runs the template and reaches the Podman host thr
 
 1. Choose `memory_gb` (2-8), `cpu_count` (2-24), and `disk_gb` (10-200; immutable after creation).
 2. The template acquires the single-workspace lease and requests iSCSI provisioning through the capability-authenticated workspace target helper.
-3. The helper provisions/attaches the target, and the Docker provider starts the container from the public GHCR image (no registry credentials needed).
+3. The helper provisions/attaches the target, and the Docker provider starts the container from the public GHCR image (no registry credentials needed), bind-mounting the iSCSI target at `/home/coder`.
 4. Stop/start preserves `/home/coder` (data on TrueNAS). Delete tears down the target + zvol.
+
+The container runs as non-root uid 1000 (`coder`) with
+`userns_mode = "keep-id:uid=1000,gid=1000"` under rootless Podman. The `uid=`/
+`gid=` suffix forces the Podman host user (uid **27003** on the podman host) to
+map to container uid 1000, so `coder` and its `/home/coder` data (owned on the
+host by uid 27003) share one owner. Plain `keep-id` alone would map host
+27003 → container 27003 and leave the uid-1000 process stranded in the subuid
+range (host 101000). `/home/coder` is a **direct bind mount**
+(not a named volume): rootless Podman's named-volume auto-chown fails on
+network-backed mounts (`lchown <volume>/_data: operation not permitted`), and
+bind mounts are never chowned.
 
 ## VS Code Remote-SSH on a NixOS workspace image
 
@@ -170,4 +181,14 @@ podman exec coder-<workspace> ls -l /lib64/ld-linux-x86-64.so.2 /lib64/libstdc++
 ## Providers
 
 - `coder/coder` and `kreuzwerker/docker` come from `registry.terraform.io`.
-- `registry.l.arrieta.eu/infra/llm01` is the pinned helper-client provider published to the in-cluster registry; checksums are committed in `.terraform.lock.hcl`. Update the source address in `main.tf` to match your provider registry.
+- `llm01` is the workspace-target helper client: source
+  `registry.home.arrieta.eu/infra/llm01`, version `~> 0.1.3`. The provider is
+  built CI as a **fully static musl** binary (`x86_64-unknown-linux-musl`,
+  `RUSTFLAGS="-C target-feature=+crt-static"`); it runs in the glibc-less
+  provisioner (0.1.1 ships a macOS Mach-O binary in the linux_amd64 zip, and
+  0.1.2 is dynamic glibc — both fail, so 0.1.3 is the minimum). It is served
+  from the public GHCR-hosted registry image; the GPG signing key fingerprint
+  is `17DC83110709EC6A07A4C7D81667A87F5D80F5EB`.
+
+See `providers/llm01_workspace_target/README.md` for the full build + release
+(including the pinned `protoc 25.1` install and detached GPG signing steps).

@@ -42,20 +42,15 @@ resource "docker_image" "workspace" {
   name = var.workspace_image
 }
 
-# 2. Local bind volume: exercises docker_volume local driver bind options, the
-#    exact mechanism the podman-template template uses for iSCSI-backed homes.
-resource "docker_volume" "home" {
-  name = "coder-compat-gate-home"
+# 2. Bind mount for the home directory: a direct bind mount of the iSCSI-backed
+#    path (no named volume), the exact mechanism the podman-template template
+#    uses. Named volumes are chowned by rootless Podman on first use, which
+#    fails with EPERM on network-backed mounts; bind mounts are never chowned.
+#    The bind source must already exist on the Podman host (like the iSCSI
+#    mount the helper creates): `sudo mkdir -p /srv/coder/workspaces/coder-compat-gate`.
 
-  driver = "local"
-  driver_opts = {
-    type   = "none"
-    o      = "bind"
-    device = "/srv/coder/workspaces/coder-compat-gate"
-  }
-}
-
-# 3. Container with memory/cpus cgroup v2 limits; run as non-root uid 1000.
+# 3. Container with memory/cpus cgroup v2 limits; run as non-root uid 1000
+#    mapped via keep-id to the podman host user.
 resource "docker_container" "workspace" {
   name  = "coder-compat-gate"
   image = docker_image.workspace.image_id
@@ -63,18 +58,20 @@ resource "docker_container" "workspace" {
   memory = 4096
   cpus   = "4"
 
-  volumes {
-    container_path = "/home/coder"
-    volume_name    = docker_volume.home.name
+  mounts {
+    target = "/home/coder"
+    source = "/srv/coder/workspaces/coder-compat-gate"
+    type   = "bind"
   }
 
-  user = "1000:1000"
+  user        = "1000:1000"
+  userns_mode = "keep-id"
 
   env = [
     "COMPAT_GATE=1",
   ]
 
-  command = ["sh", "-c", "id; mount | grep ' /home/coder '; sleep 300"]
+  command = ["sh", "-c", "id; mount | grep ' /home/coder '; touch /home/coder/.compat-write-test && ls -la /home/coder; sleep 300"]
 }
 
 # 4. Restart/destroy cycle is exercised by `terraform apply`/`terraform
