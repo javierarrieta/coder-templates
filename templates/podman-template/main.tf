@@ -95,6 +95,20 @@ resource "coder_agent" "main" {
   arch = "amd64"
   dir  = "/home/coder"
 
+  # Apply the home-manager configuration on every workspace start/recreate,
+  # straight from the GitHub flake (no local clone needed).
+  # Store paths die on workspace recreate, so a re-run is required each time.
+  # Requires the workspace image to ship home-manager with a coder-writable
+  # /nix (see nixos-configurations spec
+  # docs/superpowers/specs/2026-08-21-coder-workspace-home-manager-design.md).
+  startup_script = <<-EOT
+    #!/bin/bash
+    set -uo pipefail
+    home-manager switch \
+      --flake github:javierarrieta/nixos-configurations#coder-workspace \
+      > /home/coder/.hm-switch.log 2>&1 || echo "hm-switch failed, see ~/.hm-switch.log" >&2
+  EOT
+
   env = {
     GIT_AUTHOR_NAME     = data.coder_workspace_owner.me.name
     GIT_AUTHOR_EMAIL    = data.coder_workspace_owner.me.email
