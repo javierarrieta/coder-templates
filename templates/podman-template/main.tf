@@ -170,7 +170,7 @@ resource "docker_container" "workspace" {
   userns_mode = "keep-id:uid=1000,gid=1000"
 
   env = [
-    "CODER_AGENT_TOKEN = ${coder_agent.main.token}",
+    "CODER_AGENT_TOKEN=${coder_agent.main.token}",
   ]
 
   command = ["sh", "-c", coder_agent.main.init_script]
