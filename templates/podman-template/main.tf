@@ -33,10 +33,13 @@ variable "workspace_endpoint" {
   default     = "https://192.168.0.29:2377"
 }
 
-provider "coder" {}
+provider "coder" {
+}
 
-data "coder_workspace" "me" {}
-data "coder_workspace_owner" "me" {}
+data "coder_workspace" "me" {
+}
+data "coder_workspace_owner" "me" {
+}
 
 data "coder_parameter" "memory_gb" {
   name         = "memory_gb"
@@ -119,6 +122,25 @@ resource "docker_image" "workspace" {
   name = data.coder_parameter.workspace_image.value
 }
 
+resource "docker_container" "chown_home" {
+  count = data.coder_workspace.me.start_count
+  name  = "coder-${data.coder_workspace.me.name}-chown"
+  image = docker_image.workspace.image_id
+
+  mounts {
+    target = "/home/coder"
+    source = "/srv/coder/workspaces/coder-${data.coder_workspace.me.name}"
+    type   = "bind"
+  }
+
+  command     = ["sh", "-c", "chown -R 1000:1000 /home/coder"]
+  rm          = true
+  user        = "0:0"
+  userns_mode = "keep-id:uid=1000,gid=1000"
+
+  depends_on = [llm01_workspace_target.workspace]
+}
+
 resource "docker_container" "workspace" {
   count = data.coder_workspace.me.start_count
   name  = "coder-${data.coder_workspace.me.name}"
@@ -151,8 +173,11 @@ resource "docker_container" "workspace" {
     "CODER_AGENT_TOKEN=${coder_agent.main.token}",
   ]
 
-  command    = ["sh", "-c", coder_agent.main.init_script]
-  depends_on = [llm01_workspace_target.workspace]
+  command = ["sh", "-c", coder_agent.main.init_script]
+  depends_on = [
+    llm01_workspace_target.workspace,
+    docker_container.chown_home,
+  ]
 }
 
 resource "coder_metadata" "workspace_info" {
