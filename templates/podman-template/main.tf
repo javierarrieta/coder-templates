@@ -33,10 +33,13 @@ variable "workspace_endpoint" {
   default     = "https://192.168.0.29:2377"
 }
 
-provider "coder" {}
+provider "coder" {
+}
 
-data "coder_workspace" "me" {}
-data "coder_workspace_owner" "me" {}
+data "coder_workspace" "me" {
+}
+data "coder_workspace_owner" "me" {
+}
 
 data "coder_parameter" "memory_gb" {
   name         = "memory_gb"
@@ -165,7 +168,7 @@ resource "docker_container" "workspace" {
   userns_mode = "keep-id:uid=1000,gid=1000"
 
   env = [
-    "CODER_AGENT_TOKEN=${coder_agent.main.token}",
+    "CODER_AGENT_TOKEN = ${coder_agent.main.token}",
   ]
 
   command = ["sh", "-c", coder_agent.main.init_script]
