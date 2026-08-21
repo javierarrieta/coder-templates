@@ -10,7 +10,7 @@ terraform {
     }
     # NOTE: Update the source address to match your private provider registry.
     llm01 = {
-      source  = "registry.l.arrieta.eu/infra/llm01"
+      source  = "registry.home.arrieta.eu/infra/llm01"
       version = "~> 0.1"
     }
   }
@@ -127,6 +127,23 @@ resource "docker_image" "workspace" {
   name = data.coder_parameter.workspace_image.value
 }
 
+resource "docker_container" "chown_home" {
+  count = data.coder_workspace.me.start_count
+  name  = "coder-${data.coder_workspace.me.name}-chown"
+  image = docker_image.workspace.image_id
+
+  volumes {
+    container_path = "/home/coder"
+    volume_name    = docker_volume.home[0].name
+  }
+
+  command = ["sh", "-c", "chown -R 1000:1000 /home/coder"]
+  rm      = true
+  user    = "0:0"
+
+  depends_on = [docker_volume.home]
+}
+
 resource "docker_container" "workspace" {
   count = data.coder_workspace.me.start_count
   name  = "coder-${data.coder_workspace.me.name}"
@@ -145,7 +162,10 @@ resource "docker_container" "workspace" {
   ]
 
   command = ["sh", "-c", coder_agent.main.init_script]
-  depends_on = [llm01_workspace_target.workspace]
+  depends_on = [
+    llm01_workspace_target.workspace,
+    docker_container.chown_home,
+  ]
 }
 
 resource "coder_metadata" "workspace_info" {
