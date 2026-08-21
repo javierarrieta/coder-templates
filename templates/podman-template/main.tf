@@ -133,9 +133,9 @@ resource "docker_container" "chown_home" {
     type   = "bind"
   }
 
-  command    = ["sh", "-c", "chown -R 1000:1000 /home/coder"]
-  rm         = true
-  user       = "0:0"
+  command     = ["sh", "-c", "chown -R 1000:1000 /home/coder"]
+  rm          = true
+  user        = "0:0"
   userns_mode = "keep-id:uid=1000,gid=1000"
 
   depends_on = [llm01_workspace_target.workspace]
