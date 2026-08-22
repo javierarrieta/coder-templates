@@ -97,13 +97,16 @@ resource "coder_agent" "main" {
 
   # Apply the home-manager configuration on every workspace start/recreate,
   # straight from the GitHub flake (no local clone needed).
-  # Store paths die on workspace recreate, so a re-run is required each time.
-  # Requires the workspace image to ship home-manager with a coder-writable
-  # /nix (see nixos-configurations spec
-  # docs/superpowers/specs/2026-08-21-coder-workspace-home-manager-design.md).
+  # The nix store ships root-owned (in-build chown crashes the image
+  # builder VM), so store-dir writability for uid 1000 is granted here via
+  # the image's passwordless sudo chown rule. Store contents stay
+  # root-owned; they die on workspace recreate anyway.
+  # Requires image coder-workspaces-nix >= 0.0.3.
   startup_script = <<-EOT
     #!/bin/bash
     set -uo pipefail
+    sudo chown 1000:1000 /nix /nix/store
+    sudo chown -R 1000:1000 /nix/var/nix
     home-manager switch \
       --flake github:javierarrieta/nixos-configurations#coder-workspace \
       > /home/coder/.hm-switch.log 2>&1 || echo "hm-switch failed, see ~/.hm-switch.log" >&2
@@ -128,7 +131,7 @@ data "coder_parameter" "workspace_image" {
   display_name = "Workspace image"
   description  = "Workspace container image (registry/repo:tag)"
   type         = "string"
-  default      = "ghcr.io/javierarrieta/coder-workspace:20260818-0dce5e8"
+  default      = "ghcr.io/javierarrieta/coder-workspaces-nix:0.0.3"
   mutable      = true
 }
 
