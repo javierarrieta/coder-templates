@@ -102,9 +102,7 @@ resource "coder_agent" "main" {
   startup_script = <<-EOT
     #!/bin/bash
     set -uo pipefail
-    home-manager switch \
-      --flake github:javierarrieta/nixos-configurations#coder-workspace \
-      > /home/coder/.hm-switch.log 2>&1 || echo "hm-switch failed, see ~/.hm-switch.log" >&2
+    if ! home-manager switch --flake github:javierarrieta/nixos-configurations#coder-workspace >> /home/coder/.hm-switch.log 2>&1; then echo "hm-switch failed $(date -u +%FT%TZ)" >> /home/coder/.hm-switch.log; fi
   EOT
 
   env = {
@@ -203,7 +201,8 @@ resource "docker_container" "workspace" {
     chmod +x /tmp/agent-init.sh
     chown 1000:1000 /nix /nix/store || echo 'store setup failed'
     chmod u+rwx /nix/store || true
-    mkdir -p /nix/var/nix && chown -R 1000:1000 /nix/var/nix || true
+    mkdir -p /nix/var/nix
+    chown -R 1000:1000 /nix/var /nix/var/nix
     exec setpriv --reuid=1000 --regid=1000 --init-groups /tmp/agent-init.sh
   EOS
   ]
