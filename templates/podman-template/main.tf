@@ -151,7 +151,12 @@ resource "docker_container" "chown_home" {
   }
 
   command     = ["sh", "-c", "chown -R 1000:1000 /home/coder"]
-  rm          = true
+  # Podman removes --rm containers the instant they exit, so the provider's
+  # follow-up inspect calls fail with "no such container ... found in
+  # database". Keep the exited container instead; it is one-shot work and
+  # Terraform still owns its lifecycle.
+  rm          = false
+  must_run    = false
   user        = "0:0"
   userns_mode = "keep-id:uid=1000,gid=1000"
 
