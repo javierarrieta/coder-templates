@@ -95,18 +95,13 @@ resource "coder_agent" "main" {
   arch = "amd64"
   dir  = "/home/coder"
 
-  # Apply the home-manager configuration on every workspace start/recreate,
-  # straight from the GitHub flake (no local clone needed).
-  # The nix store ships root-owned (in-build chown crashes the image
-  # builder VM), so store-dir writability for uid 1000 is granted here via
-  # the image's passwordless sudo chown rule. Store contents stay
-  # root-owned; they die on workspace recreate anyway.
-  # Requires image coder-workspaces-nix >= 0.0.3.
+  # Config-only home-manager: dotfiles from github main; software comes from
+  # the image. Requires image >= 0.0.6 and the flake merged to main.
+  # Store-dir writability for uid 1000 is granted by the container's root
+  # boot (see docker_container.workspace); no sudo needed here.
   startup_script = <<-EOT
     #!/bin/bash
     set -uo pipefail
-    sudo chown 1000:1000 /nix /nix/store
-    sudo chown -R 1000:1000 /nix/var/nix
     home-manager switch \
       --flake github:javierarrieta/nixos-configurations#coder-workspace \
       > /home/coder/.hm-switch.log 2>&1 || echo "hm-switch failed, see ~/.hm-switch.log" >&2
@@ -131,7 +126,7 @@ data "coder_parameter" "workspace_image" {
   display_name = "Workspace image"
   description  = "Workspace container image (registry/repo:tag)"
   type         = "string"
-  default      = "ghcr.io/javierarrieta/coder-workspaces-nix:0.0.3"
+  default      = "ghcr.io/javierarrieta/coder-workspaces-nix:0.0.6"
   mutable      = true
 }
 
@@ -188,14 +183,30 @@ resource "docker_container" "workspace" {
     type   = "bind"
   }
 
-  user        = "1000:1000"
+  # Boots as root solely to grant the nix store dirs to uid 1000 (in-build
+  # chown crashes the image builder VM; runtime chown is cheap). Then drops
+  # privileges and hands over to the agent init script (written to a file
+  # because an inline jsonencode'd script crashed container creation in the
+  # live spike).
+  user        = "0:0"
   userns_mode = "keep-id:uid=1000,gid=1000"
 
   env = [
     "CODER_AGENT_TOKEN=${coder_agent.main.token}",
+    "NIX_PATH=nixpkgs=https://github.com/NixOS/nixpkgs/archive/nixos-unstable.tar.gz",
   ]
 
-  command = ["sh", "-c", coder_agent.main.init_script]
+  command = ["sh", "-c", <<-EOS
+    cat > /tmp/agent-init.sh <<'AGENTINIT'
+    ${coder_agent.main.init_script}
+    AGENTINIT
+    chmod +x /tmp/agent-init.sh
+    chown 1000:1000 /nix /nix/store || echo 'store setup failed'
+    chmod u+rwx /nix/store || true
+    mkdir -p /nix/var/nix && chown -R 1000:1000 /nix/var/nix || true
+    exec setpriv --reuid=1000 --regid=1000 --init-groups /tmp/agent-init.sh
+  EOS
+  ]
   depends_on = [
     llm01_workspace_target.workspace,
     docker_container.chown_home,
