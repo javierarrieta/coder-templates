@@ -102,7 +102,7 @@ resource "coder_agent" "main" {
   startup_script = <<-EOT
     #!/bin/bash
     set -uo pipefail
-    if ! home-manager switch --flake github:javierarrieta/nixos-configurations#coder-workspace >> /home/coder/.hm-switch.log 2>&1; then echo "hm-switch failed $(date -u +%FT%TZ)" >> /home/coder/.hm-switch.log; fi
+    if ! home-manager switch -b pre-hm --flake github:javierarrieta/nixos-configurations#coder-workspace >> /home/coder/.hm-switch.log 2>&1; then echo "hm-switch failed $(date -u +%FT%TZ)" >> /home/coder/.hm-switch.log; fi
   EOT
 
   env = {
