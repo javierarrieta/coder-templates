@@ -132,30 +132,6 @@ resource "docker_image" "workspace" {
   name = data.coder_parameter.workspace_image.value
 }
 
-resource "docker_container" "chown_home" {
-  count = data.coder_workspace.me.start_count
-  name  = "coder-${data.coder_workspace.me.name}-chown"
-  image = docker_image.workspace.image_id
-
-  mounts {
-    target = "/home/coder"
-    source = "/srv/coder/workspaces/coder-${data.coder_workspace.me.name}"
-    type   = "bind"
-  }
-
-  command = ["sh", "-c", "chown -R 1000:1000 /home/coder"]
-  # Podman removes --rm containers the instant they exit, so the provider's
-  # follow-up inspect calls fail with "no such container ... found in
-  # database". Keep the exited container instead; it is one-shot work and
-  # Terraform still owns its lifecycle.
-  rm          = false
-  must_run    = false
-  user        = "0:0"
-  userns_mode = "keep-id:uid=1000,gid=1000"
-
-  depends_on = [llm01_workspace_target.workspace]
-}
-
 resource "docker_container" "workspace" {
   count = data.coder_workspace.me.start_count
   name  = "coder-${data.coder_workspace.me.name}"
@@ -209,7 +185,6 @@ resource "docker_container" "workspace" {
   ]
   depends_on = [
     llm01_workspace_target.workspace,
-    docker_container.chown_home,
   ]
 }
 
