@@ -179,7 +179,10 @@ resource "docker_container" "workspace" {
     chmod u+rwx /nix/store || true
     mkdir -p /nix/var/nix
     chown -R 1000:1000 /nix/var /nix/var/nix
-    chown -R 1000:1000 /home/coder
+    # Top-level only: a recursive chown crawls the whole home volume over
+    # iSCSI and blocks agent start for many minutes. Volume contents are
+    # already uid 1000 from prior use; fix strays with a one-off if ever seen.
+    chown 1000:1000 /home/coder
     exec setpriv --reuid=1000 --regid=1000 --init-groups /tmp/agent-init.sh
   EOS
   ]
