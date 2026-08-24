@@ -16,56 +16,48 @@ coder-templates/
     providers/llm01_workspace_target/       # Rust Terraform provider
       Cargo.toml / Cargo.lock / src/{lib,main}.rs
     README.md               # canonical push + image-rebuild instructions (read this first)
-  nixos-configurations/ (OUTSIDE this repo)  # pkgs/coder-workspace builds the workspace image;
-                                             # .github/workflows/workspace-image.yml pushes it to GHCR;
-                                             # IMAGE_TAGS.md records tags (update/rollback reference)
+  coder-workspaces/ (OUTSIDE this repo)  # image.nix builds the workspace image;
+                                         # .github/workflows/release.yml pushes it to GHCR on
+                                         # semver GitHub Releases (release history = rollback reference)
 ```
 
-The workspace image itself is built from `~/code/nixos-configurations/pkgs/coder-workspace`
-(`dockerTools.buildImage` in the nixos-configurations flake), not from this repo.
-Changes to the image require editing the Nix flake and pushing a new image tag.
+The workspace image itself is built from `~/coder-workspaces` (`image.nix`,
+`dockerTools.buildImage` in its flake, output `.#coder-workspaces-nix`), not
+from this repo. Changes to the image require editing the Nix flake and pushing
+a new image tag.
 
 ## Rebuild + push the workspace image (GitHub Actions + GHCR)
 
-The image is built in the sibling repo **`nixos-configurations`**
-(<https://github.com/javierarrieta/nixos-configurations>). A workflow at
-`.github/workflows/workspace-image.yml` builds `.#coder-workspace` on an
-`ubuntu-latest` runner (Nix via `nix-installer-action`) and pushes to the public
-**GHCR** package `ghcr.io/javierarrieta/coder-workspace`. No llm01 build host,
-no registry credentials (public pull), no macOS keychain involved.
+The image is built in the sibling repo **`coder-workspaces`**. Publishing is
+release-driven: a workflow at `.github/workflows/release.yml` runs on a semver
+GitHub Release (`vMAJOR.MINOR.PATCH`), builds `.#coder-workspaces-nix` on an
+`ubuntu-latest` runner (Nix via `nix-installer-action`), and pushes to the
+public **GHCR** package `ghcr.io/javierarrieta/coder-workspaces-nix`. No llm01
+build host, no registry credentials (public pull), no macOS keychain involved.
 
-Edit only `pkgs/coder-workspace/default.nix` in that repo (do NOT touch the
-`fish` package override at the top, which bakes config into the fish package;
-its `doCheck = false` keeps the test suite from running in CI). The workflow
-runs on:
-
-- push to `main` touching `pkgs/coder-workspace/**`, `flake.lock`, or the workflow
-- manual dispatch: `gh workflow run workspace-image.yml`
+Edit only `image.nix` in that repo (do NOT touch the `fish` package override at
+the top, which bakes config into the fish package; its `doCheck = false` keeps
+the test suite from running in CI). Local build: `nix build .#coder-workspaces-nix`.
 
 ### Tag strategy (updates + rollback)
 
-Each CI build pushes two tags to GHCR:
-
-- `YYYYMMDD-<short-sha>` — immutable, content-accurate (CI builds the exact
-  commit). Date prefix shows recency; never overwritten, so rollback-safe.
-- `latest` — mutable pointer to the newest build (convenience only).
-
-`IMAGE_TAGS.md` in the nixos-configurations repo is auto-appended by the
-workflow (`tag | date | commit | changes`) and is the update/rollback
-reference: newest row = current, older rows are rollback targets. Pin
-`workspace_image` in the template to an immutable tag, never `latest`.
+A release tagged `v1.2.3` pushes these tags to GHCR: `v1.2.3`, `1.2.3`,
+`v1.2`, `1.2`, `v1`, `1`, and mutable `latest`. Rollback = pin an older
+release's tag (GitHub Releases history is the rollback reference). Pin
+`workspace_image` in the template to an immutable full-semver tag, never
+`latest`.
 
 ### Who owns what (why two repos)
 
 The image and the template are coupled only by a tag string — nothing is
 pushed from one repo into the other:
 
-- **nixos-configurations** owns the image *source* (the Nix flake) and the
+- **coder-workspaces** owns the image *source* (the Nix flake) and the
   build+push pipeline. Its CI publishes to the GHCR **package**
-  `ghcr.io/javierarrieta/coder-workspace` (owned by the GitHub user, not by a
-  repo) and records tags in `IMAGE_TAGS.md`.
+  `ghcr.io/javierarrieta/coder-workspaces-nix`; GitHub Releases are the tag
+  history / rollback reference.
 - **coder-templates** only references the image by tag
-  (`workspace_image = "ghcr.io/javierarrieta/coder-workspace:<tag>"` in
+  (`workspace_image = "ghcr.io/javierarrieta/coder-workspaces-nix:<tag>"` in
   `main.tf`). The workflow never writes here.
 
 The one manual hop: after CI publishes a new tag, pin it into `main.tf` and
@@ -88,15 +80,15 @@ Verify the wiring before pushing the template:
 
 ```bash
 # non-interactive piped shell stays bash (the VS Code Remote-SSH path)
-docker run --rm --entrypoint sh coder-workspace:pinned \
+docker run --rm --entrypoint sh coder-workspaces-nix:pinned \
   -c 'echo hi | bash -c "echo running:\$0; type -t command"'   # expect: running:bash
 # interactive TTY execs fish
-docker run --rm -it --entrypoint bash coder-workspace:pinned -c 'echo $0'        # expect: fish
+docker run --rm -it --entrypoint bash coder-workspaces-nix:pinned -c 'echo $0'        # expect: fish
 ```
 
-After the workflow run, pin `workspace_image` in the template to the new
-immutable tag from `IMAGE_TAGS.md`, push the template, and **update** the
-workspace (see below).
+After a release is published, pin `workspace_image` in the template to the new
+immutable semver tag, push the template, and **update** the workspace (see
+below).
 
 ## Push a template change (exact)
 
@@ -120,15 +112,15 @@ the mutable `workspace_image` parameter that overrides the new template default.
 "unknown flag: --force".) Reset the stored parameter by passing it explicitly on
 `restart`, which re-applies it:
 ```bash
-coder restart <workspace> --parameter workspace_image=ghcr.io/javierarrieta/coder-workspace:<YYYYMMDD-short-sha>
+coder restart <workspace> --parameter workspace_image=ghcr.io/javierarrieta/coder-workspaces-nix:<semver>
 ```
 Confirm with `yes` at the restart prompt. Verify the running container picked up
 the new image after the restart (e.g. `coder ssh <workspace> 'command -v sops age'`).
 
 ## Workspace image (NixOS + VS Code Server) rules
 
-Built in `~/code/nixos-configurations/pkgs/coder-workspace/default.nix` via
-`pkgs.dockerTools.buildImage { name="coder-workspace"; tag="pinned"; ... }`. The
+Built in `~/coder-workspaces/image.nix` via
+`pkgs.dockerTools.buildImage { name="coder-workspaces-nix"; tag="pinned"; ... }`. The
 container runs as uid 1000 (`coder`), `Cmd = ["/bin/sh"]`, `SHELL=/bin/bash`,
 `PATH` includes `~/.cargo/bin`, `~/.local/bin`, `~/.bun/bin`, and
 `LD_LIBRARY_PATH=/lib64:/usr/lib64:/usr/lib`.
@@ -142,7 +134,22 @@ default glibc `server-linux-x64` build runs:
 - `libstdc++.so.6` → `${pkgs.stdenv.cc.cc.lib}/lib/libstdc++.so.6`
 - `libgcc_s.so.1` → `${pkgs.libgcc}/lib/libgcc_s.so.1`
 - `libz.so.1` → `${pkgs.zlib}/lib/libz.so.1`
+- `libssl.so.3` + `libcrypto.so.3` → `${pkgs.openssl}/lib/...` (in `/lib64`,
+  `/usr/lib`, `/usr/lib64`)
 - `/usr/bin/env`, `/sbin/ldconfig`, `/usr/bin/ldd`, and `touch /etc/NIXOS`.
+
+**Do NOT drop or retarget the openssl symlinks.** VS Code's extension-signature
+verifier (`@vscode/vsce-sign`'s `bin/vsce-sign`, a .NET single-file binary) only
+dlopens libssl when it actually verifies a signature. If the symlink is missing
+or dangling it SIGABRTs with `No usable version of libssl was found`; node's
+`execFile` then reports a signal kill (`error.code === null`, not numeric),
+which vsce-sign maps to `UnknownError, Executed: false` — the misleading
+"Signature verification failed with 'UnknownError'" on every extension install.
+A symlink pointing at a store path outside the image closure (e.g.
+`openssl-*-bin`) produces exactly this; verify with
+`ls -l /lib64/libssl.so.3` inside the container (target must exist). Fake-file
+smoke tests of the binary don't catch this — arg-validation errors exit before
+the OpenSSL code path.
 
 **Do NOT add a musl loader at `/lib` (`ld-musl-x86_64.so.so.1`).** Doing so makes
 VS Code's `check_musl_interpreter` probe download the Alpine/musl server build,
@@ -155,13 +162,13 @@ what runs on these glibc libraries.
 `/etc/profile` (guard: `[[ $- == *i* ]] && [[ -t 0 ]] && command -v fish >/dev/null 2>&1`;
 `[[ -o interactive ]]` is wrong — `interactive` is not a valid option).
 
-After rebuilding the image, pin `workspace_image` to the new immutable tag from
-`IMAGE_TAGS.md`, push the template, and **update** the workspace. Verify on the
+After rebuilding the image, pin `workspace_image` to the new immutable semver
+tag, push the template, and **update** the workspace. Verify on the
 Podman host:
 
 ```sh
 podman inspect coder-<workspace> --format '{{json .Config.Image}}'
-podman exec coder-<workspace> ls -l /lib64/ld-linux-x86-64.so.2 /lib64/libstdc++.so.6
+podman exec coder-<workspace> ls -l /lib64/ld-linux-x86-64.so.2 /lib64/libstdc++.so.6 /lib64/libssl.so.3
 ```
 
 ## Template parameters / constraints

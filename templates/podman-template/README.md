@@ -93,11 +93,11 @@ boot as root (or apply the durable image fix below).
 
 Prefer the root-level wiring at build time (runs as root regardless of the
 container's startup user, and persists across container restarts/recreates).
-The current image (`coder-workspace`) boots as `coder` (uid 1000), so the
-template shim above **does not run**. The image is built from
-`pkgs/coder-workspace` (`dockerTools.buildImage` in the `nixos-configurations`
-flake); its `runAsRoot` does the following so VS Code Server's glibc binaries
-can exec and resolve libraries from the store:
+The current image (`coder-workspaces-nix`) boots as `coder` (uid 1000), so the
+template shim above **does not run**. The image is built from `image.nix`
+(`dockerTools.buildImage` in the `coder-workspaces` flake); its `runAsRoot`
+does the following so VS Code Server's glibc binaries can exec and resolve
+libraries from the store:
 
 ```sh
 # glibc loader + libs at FHS paths so unpatched binaries can run.
@@ -142,13 +142,13 @@ it, `check_is_nixos` (`/etc/NIXOS`) + the GNU libstdc++/libc probes select the
 default `server-linux-x64` build, which is exactly what runs on these glibc
 libraries.
 
-After the rebuild (GitHub Actions workflow in `nixos-configurations`
-`.github/workflows/workspace-image.yml` pushes to
-`ghcr.io/javierarrieta/coder-workspace`): pin `workspace_image` to the new
-immutable `YYYYMMDD-<short-sha>` tag from `IMAGE_TAGS.md`, push the template
-(`coder templates push`), and **update** the workspace (push alone does not
-upgrade existing workspaces; a plain restart keeps the old image/command).
-Verify on the Podman host before testing VS Code:
+After the rebuild (GitHub Release in `coder-workspaces` triggers
+`.github/workflows/release.yml`, which pushes to
+`ghcr.io/javierarrieta/coder-workspaces-nix`): pin `workspace_image` to the new
+immutable semver tag (e.g. `1.2.3`; GitHub Releases history is the rollback
+reference), push the template (`coder templates push`), and **update** the
+workspace (push alone does not upgrade existing workspaces; a plain restart
+keeps the old image/command). Verify on the Podman host before testing VS Code:
 
 ```sh
 podman inspect coder-llm01-podman --format '{{json .Config.Image}}'
@@ -167,7 +167,7 @@ shows the old image, the mutable `workspace_image` parameter has a stored value
 overriding the new default — pass it explicitly on restart (there is no
 `--force` flag in Coder v2.35.1):
 ```sh
-coder restart <workspace> --parameter workspace_image=ghcr.io/javierarrieta/coder-workspace:<YYYYMMDD-short-sha>
+coder restart <workspace> --parameter workspace_image=ghcr.io/javierarrieta/coder-workspaces-nix:<semver>
 ```
 Verify the container got the new command and the file on the
 Podman host:
