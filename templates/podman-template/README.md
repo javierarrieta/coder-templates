@@ -4,18 +4,44 @@ Workspaces run as rootless podman containers on the configured host with homes o
 
 ## Push
 
+Use the repo helper rather than pointing `--directory` at the template dir:
+
 ```bash
 coder login <coder url>
-coder templates push podman-template \
-  --directory templates/podman-template \
-  --yes
+scripts/push-template.sh            # defaults to podman-template
 ```
+
+**Do not run `coder templates push --directory templates/podman-template`.**
+The CLI tars the whole directory and the server rejects archives over 1 MiB
+(`Archive too big. Must be <= 1048576 bytes`). This directory holds ~334 MB of
+untracked build output (`providers/llm01_workspace_target/target` 272 MB,
+`compatibility/.terraform` 63 MB) and the CLI honors **neither** `.coderignore`
+nor `.gitignore` when building that tar -- verified on v2.35.1, where a
+`target/` already git-ignored by the root `.gitignore` was still uploaded.
+
+`scripts/push-template.sh` stages only git-tracked (and non-ignored) files into
+a temp dir and pushes that. The template needs only `main.tf`: it has no
+`file()`/`templatefile()` references, and the `llm01` provider is fetched from
+the provider registry by `terraform init` in the provisioner, never shipped
+from the template archive.
+
+Verify what the server actually stored after a push:
+
+```bash
+coder templates versions list podman-template | head -3   # ACTIVE row
+coder templates pull podman-template /tmp/verify && grep -n nix_build_cores /tmp/verify/main.tf
+```
+
+(`coder templates pull` takes the destination as a **positional** arg, not
+`--directory`; there is no `coder templates parameters` subcommand in v2.35.1.)
 
 The built-in Coder provisioner runs the template and reaches the Podman host through the configured mTLS API.
 
 ## Creating a workspace
 
-1. Choose `memory_gb` (2-8), `cpu_count` (2-24), and `disk_gb` (10-200; immutable after creation).
+1. Choose `memory_gb` (2-8), `cpu_count` (2-24), `disk_gb` (10-200; immutable
+   after creation), and `nix_build_cores` (1-8; caps `NIX_BUILD_CORES` per build
+   job -- see the comment on the parameter for why the default is 2).
 2. The template acquires the single-workspace lease and requests iSCSI provisioning through the capability-authenticated workspace target helper.
 3. The helper provisions/attaches the target, and the Docker provider starts the container from the public GHCR image (no registry credentials needed), bind-mounting the iSCSI target at `/home/coder`.
 4. Stop/start preserves `/home/coder` (data on TrueNAS). Delete tears down the target + zvol.
