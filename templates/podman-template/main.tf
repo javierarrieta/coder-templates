@@ -80,6 +80,33 @@ data "coder_parameter" "disk_gb" {
   mutable = false
 }
 
+# Nix build parallelism.
+#
+# Nix's default `cores = 0` means "use every core", and it resolves that via
+# std::thread::hardware_concurrency() -> sched_getaffinity, which is NOT
+# cgroup-aware. Verified in coder-workspaces-nix v0.0.10 (Nix 2.31.2): in a
+# --cpus=2 container the affinity mask is still the full 32-core host mask
+# (nproc reports 2, sched_getaffinity reports 0-31), so a single build forks
+# -j32 compilers and pays ~32x the peak RSS against the workspace memory
+# limit -- which is how the workspace cgroup gets OOM-killed. Cap it explicitly.
+#
+# NOTE: this bounds the BUILD phase only. Nix 2.31 has no `max-threads` setting
+# (`nix config show` -> "unknown setting 'max-threads'"), so evaluation is not
+# thread-tunable; eval peak RSS is the flake's live working set and only more
+# memory_gb reduces that.
+data "coder_parameter" "nix_build_cores" {
+  name         = "nix_build_cores"
+  display_name = "Nix build cores"
+  description  = "NIX_BUILD_CORES per nix build job (-j). Caps concurrent compiler processes, and so peak build memory. Does NOT bound nix evaluation memory. Restart the workspace to apply."
+  type         = "number"
+  default      = 2
+  validation {
+    min = 1
+    max = 8
+  }
+  mutable = true
+}
+
 provider "docker" {
   host      = var.docker_host
   cert_path = "/run/secrets/coder-podman-client"
@@ -88,6 +115,15 @@ provider "docker" {
 provider "llm01" {
   endpoint  = var.workspace_endpoint
   cert_path = "/run/secrets/coder-podman-client"
+}
+
+# Remaining fixed Nix knobs. Build parallelism itself is a workspace parameter
+# (data.coder_parameter.nix_build_cores) so it can be retuned per workspace.
+locals {
+  nix_max_jobs = 1
+
+  # oom_score_adj for nix/home-manager. Higher = killed first.
+  nix_oom_score = 1000
 }
 
 resource "coder_agent" "main" {
@@ -102,6 +138,13 @@ resource "coder_agent" "main" {
   startup_script = <<-EOT
     #!/bin/bash
     set -uo pipefail
+    # OOM shield for the boot-time home-manager eval/build: this process and
+    # everything it forks become the kernel's preferred victim, so when the
+    # workspace cgroup runs out of memory the nix work is reaped rather than
+    # the coder agent (PID 1 -- if it dies the container dies and the workspace
+    # drops). Raising our own score is unprivileged; lowering the agent's would
+    # need CAP_SYS_RESOURCE in init_user_ns, which rootless Podman lacks.
+    echo ${local.nix_oom_score} > /proc/self/oom_score_adj 2>/dev/null || true
     if ! home-manager switch -b pre-hm --flake github:javierarrieta/nixos-configurations#coder-workspace >> /home/coder/.hm-switch.log 2>&1; then echo "hm-switch failed $(date -u +%FT%TZ)" >> /home/coder/.hm-switch.log; fi
   EOT
 
@@ -119,12 +162,17 @@ resource "llm01_workspace_target" "workspace" {
   active    = data.coder_workspace.me.start_count > 0
 }
 
+# Pinned to the tag the running workspace actually uses. The registry publishes
+# both "v0.0.10" and "0.0.10" at the same digest
+# (sha256:dc9ce820fe127c83b0622faea5a1873e73b8a23bca840055aea512742c62fa69),
+# which is also what "latest" points at right now -- never default to "latest",
+# it moves under you and breaks rollback.
 data "coder_parameter" "workspace_image" {
   name         = "workspace_image"
   display_name = "Workspace image"
   description  = "Workspace container image (registry/repo:tag)"
   type         = "string"
-  default      = "ghcr.io/javierarrieta/coder-workspaces-nix:0.0.7"
+  default      = "ghcr.io/javierarrieta/coder-workspaces-nix:v0.0.10"
   mutable      = true
 }
 
@@ -183,6 +231,31 @@ resource "docker_container" "workspace" {
     # iSCSI and blocks agent start for many minutes. Volume contents are
     # already uid 1000 from prior use; fix strays with a one-off if ever seen.
     chown 1000:1000 /home/coder
+
+    # Cap Nix build parallelism (see data.coder_parameter.nix_build_cores). Written to the
+    # system nix.conf rather than the NIX_CONFIG env var because home-manager
+    # exports its own session NIX_CONFIG (experimental-features only), which
+    # would otherwise shadow this. Guarded so repeated starts don't grow the
+    # file.
+    mkdir -p /etc/nix
+    grep -q '^# coder-template nix limits' /etc/nix/nix.conf 2>/dev/null || printf '\n# coder-template nix limits\ncores = %s\nmax-jobs = %s\n' '${tostring(data.coder_parameter.nix_build_cores.value)}' '${tostring(local.nix_max_jobs)}' >> /etc/nix/nix.conf
+
+    # Nix OOM shield. When the workspace memory cgroup is exhausted the kernel
+    # picks a victim from inside it, and the coder agent is PID 1 of this
+    # container: if it is chosen, the container dies and the workspace drops.
+    # Put a shim in front of the real nix so every nix invocation -- boot-time
+    # home-manager, an interactive terminal, or an in-workspace coding agent --
+    # raises its own oom_score_adj before running. The shim is resolved at boot
+    # from the real PATH so it never points at itself, and the prepend survives
+    # to the agent and all PTYs (nothing in this image's /etc/profile,
+    # /etc/bashrc or /etc/fish/config.fish rewrites PATH).
+    REAL_NIX="$(command -v nix || true)"
+    [ -n "$REAL_NIX" ] || REAL_NIX=/bin/nix
+    mkdir -p /nix-oom-shield
+    printf '#!/bin/sh\necho ${local.nix_oom_score} > /proc/self/oom_score_adj 2>/dev/null || true\nexec %s "$@"\n' "$REAL_NIX" > /nix-oom-shield/nix
+    chmod 0755 /nix-oom-shield/nix
+    export PATH="/nix-oom-shield:$PATH"
+
     exec setpriv --reuid=1000 --regid=1000 --init-groups /tmp/agent-init.sh
   EOS
   ]

@@ -92,11 +92,32 @@ below).
 
 ## Push a template change (exact)
 
+Use the repo helper. **Do NOT use `--directory templates/podman-template`** — it
+fails on the 1 MiB upload cap (see below).
+
 ```bash
 coder login <coder url>
-coder templates push podman-template \
-  --directory templates/podman-template \
-  --yes
+scripts/push-template.sh            # defaults to podman-template
+```
+
+**Why:** `coder templates push` (v2.35.1) tars the entire target directory and
+the server rejects archives over 1 MiB (`Archive too big. Must be <=
+1048576 bytes`). The template dir holds ~334 MB of untracked build output
+(`providers/llm01_workspace_target/target` 272 MB, `compatibility/.terraform`
+63 MB), and the CLI honors **neither** `.coderignore` nor `.gitignore` when
+building that tar — verified: a `target/` already ignored by the root
+`.gitignore` was still uploaded. `scripts/push-template.sh` stages only
+git-tracked/non-ignored files (~40 KiB) into a temp dir and pushes that. The
+template needs only `main.tf` (no `file()`/`templatefile()` refs); the `llm01`
+provider is fetched from the provider registry by `terraform init` in the
+provisioner, never shipped in the archive.
+
+Verify what the server stored (`pull` takes the destination as a **positional**
+arg, and there is no `coder templates parameters` subcommand in v2.35.1):
+
+```bash
+coder templates versions list podman-template | head -3   # the ACTIVE row
+coder templates pull podman-template /tmp/verify && grep -n nix_build_cores /tmp/verify/main.tf
 ```
 
 After changing the template or the workspace image, you must also **update** the
